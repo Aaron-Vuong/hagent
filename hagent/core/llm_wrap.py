@@ -9,6 +9,7 @@ from ruamel.yaml import YAML
 from ruamel.yaml.scalarstring import LiteralScalarString
 
 from hagent.core.llm_template import LLM_template
+from hagent.core.tracer import TracerMetaClass
 
 
 def dict_deep_merge(dict1: Dict, dict2: Dict) -> Dict:
@@ -32,7 +33,7 @@ def dict_deep_merge(dict1: Dict, dict2: Dict) -> Dict:
     return dict1
 
 
-class LLM_wrap:
+class LLM_wrap(metaclass=TracerMetaClass):
     def load_config(self) -> Dict:
         if not os.path.exists(self.conf_file):
             self._set_error(f'unable to read conf_file: {self.conf_file}')

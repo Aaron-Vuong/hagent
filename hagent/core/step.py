@@ -11,7 +11,7 @@ from ruamel.yaml.scalarstring import LiteralScalarString
 
 from hagent.core.llm_wrap import dict_deep_merge
 from hagent.core.llm_wrap import LLM_wrap
-
+from hagent.core.tracer import TracerMetaClass
 
 def wrap_literals(obj):
     # Recursively wrap multiline strings as LiteralScalarString for nicer YAML output.
@@ -25,7 +25,7 @@ def wrap_literals(obj):
         return obj
 
 
-class Step:
+class Step(metaclass=TracerMetaClass):
     def __init__(self):
         self.input_file = None
         self.output_file = None

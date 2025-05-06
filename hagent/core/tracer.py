@@ -1,12 +1,25 @@
+import datetime
 import functools
+import inspect
 import json
+import litellm
 import threading
 import time
 
+from abc import ABCMeta
 from enum import Enum
+
+from litellm.integrations.custom_logger import CustomLogger
 
 # Keep everything under one tab in the Perfetto timeline.
 HAGENT_ID = 10
+LLM_ID = 11
+
+def s_to_us(s: float) -> float:
+    """
+    Convert seconds to microseconds.
+    """
+    return s * 1_000_000
 
 # https://docs.python.org/3/howto/logging-cookbook.html#implementing-structured-logging
 class Encoder(json.JSONEncoder):
@@ -17,6 +30,9 @@ class Encoder(json.JSONEncoder):
             return o.encode('unicode_escape').decode('ascii')
         return super().default(o)
 
+#####################
+## TRACER PERFETTO ##
+#####################
 class PhaseType(str, Enum):
     """
     Enum for Perfetto PhaseType constants.
@@ -54,6 +70,12 @@ class TraceEvent:
             pid: int,
             tid: int,
             **kwargs):
+        self.name = name
+        self.cat = cat
+        self.ph = ph
+        self.ts = ts
+        self.pid = pid
+        self.tid = tid
         self.__dict__["args"] = {}
         for arg_name in kwargs:
             if arg_name in self.optional_args:
@@ -66,11 +88,9 @@ class TraceEvent:
         Returns:
             A dictionary repr of the TraceEvent with non-null values.
         """
-        d = self.__dict__
-
         # Delete any optional values so they don't pollute the trace.
         pruned_d = {}
-        for key, val in d.items():
+        for key, val in self.__dict__.items():
             if val is not None:
                 pruned_d[key] = val
         return pruned_d
@@ -133,15 +153,18 @@ class Tracer:
         if not synchronous:
             cls.create_asynchronous_trace()
         # TODO: Add necessary metadata to visualize each event nicely.
-        cls.add_metadata()
+        #cls.add_metadata()
         # TODO: Add Flow TraceEvents to depict how each step flows into the next.
-        cls.add_flow_events()
+        #cls.add_flow_events()
 
         with open(filename, "w+", encoding="utf-8") as f:
-            json.dumps({
-                "traceEvents": cls.events
-            }, f)
+            json.dump({
+                "traceEvents": [event.to_json() for event in cls.events]
+            }, f, indent=2, default=str)
 
+###############
+## METACLASS ##
+###############
 def trace_function(func):
     """
     Decorator to provide the Tracer logger with all metadata to construct a trace.
@@ -164,10 +187,10 @@ def trace_function(func):
             serialized_kwargs[str(key)] = str(val)
 
         Tracer.log(TraceEvent(
-            name = func.__qualname__,
+            name = func.__name__,
             cat = "hagent",
             ph = PhaseType.COMPLETE,
-            ts = time.time(),
+            ts = s_to_us(time.time()),
             pid = HAGENT_ID,
             # TODO: Investigate using something else?
             tid = threading.get_ident(),
@@ -175,9 +198,9 @@ def trace_function(func):
                 "func": func.__name__,
                 "func_args": serialized_args,
                 "func_kwargs": serialized_kwargs,
-                "func_result": result
+                "func_result": str(result)
             },
-            dur = (end_time - start_time),
+            dur = s_to_us(end_time - start_time),
         ))
         return result
     return inner
@@ -231,6 +254,104 @@ class TracerMetaClass(type):
                 local[attr] = trace_function(value)
         return type.__new__(cls, name, bases, local)
 
+class TracerABCMetaClass(ABCMeta, TracerMetaClass):
+    """
+    Use this MetaClass when using @abstractmethod/for abstract classes.
+    """
+
+#############
+## LITELLM ##
+#############
+class TracerHandler(CustomLogger):
+    """
+    Custom callback for litellm support.
+    """
+    def log_pre_api_call(self, model, messages, kwargs): 
+        print(f" <--- Pre-API Call")
+        # print(f"MODEL: {model}")
+        # print(f"MESSAGES: {messages}")
+        # print(f"KWARGS: {kwargs}")
+        print(f"PRE API START: {time.time()}")
+        
+        Tracer.log(TraceEvent(
+            name = kwargs["litellm_call_id"] + "_PRE",
+            cat = "hagent",
+            ph = PhaseType.COMPLETE,
+            ts = s_to_us(time.time()),
+            pid = 10,
+            # TODO: Investigate using something else?
+            tid = 5333,
+            args = {
+                "kwargs": kwargs,
+                "messages": messages,
+            },
+            dur = s_to_us(0),
+        ))
+        print(f" ---> Pre-API Call")
+    
+    def log_post_api_call(self, kwargs, response_obj, start_time, end_time): 
+        print(f" <--- Post-API Call")
+        print(f"KWARGS: {kwargs}")
+        print(f"RESPONSE_OBJ: {response_obj}")
+        print(f"START: {start_time}")
+        print(f"END: {end_time}")
+        print(f" ---> Post-API Call")
+    
+
+    def log_success_event(self, kwargs, response_obj, start_time, end_time): 
+        print(f" <--- On Success")
+        #print(f"KWARGS: {kwargs}")
+        duration = (end_time - start_time).total_seconds()
+        #print(f"duration: {duration}")
+        print(f"SUCCESS START: {time.time()}")
+        print("logging")
+        Tracer.log(TraceEvent(
+            name = kwargs["litellm_call_id"] + "_SUCCESS",
+            cat = "hagent",
+            ph = PhaseType.COMPLETE,
+            ts = s_to_us(start_time.timestamp()),
+            pid = 10,
+            # TODO: Investigate using something else?
+            tid = 5333,
+            args = {
+                "kwargs": kwargs,
+                "response_obj": response_obj
+            },
+            dur = s_to_us(duration),
+        ))
+        print(f" ---> On Success")
+        Tracer.save_perfetto_trace()
+
+    def log_failure_event(self, kwargs, response_obj, start_time, end_time): 
+        print(f" <--- On Failure")
+        print(f"KWARGS: {kwargs}")
+        print(f"RESPONSE_OBJ: {response_obj}")
+        print(f"START: {start_time}")
+        print(f"END: {end_time}")
+        print(f" ---> On Failure")
+    
+    #### ASYNC #### - for acompletion/aembeddings
+
+    async def async_log_success_event(self, kwargs, response_obj, start_time, end_time):
+        print(f" <--- On Async Success")
+        print(f"KWARGS: {kwargs}")
+        print(f"RESPONSE_OBJ: {response_obj}")
+        print(f"START: {start_time}")
+        print(f"END: {end_time}")
+        print(f" ---> On Async Success")
+
+    async def async_log_failure_event(self, kwargs, response_obj, start_time, end_time):
+        print(f" <--- On Async Failure")
+        print(f"KWARGS: {kwargs}")
+        print(f"RESPONSE_OBJ: {response_obj}")
+        print(f"START: {start_time}")
+        print(f"END: {end_time}")
+        print(f" ---> On Async Failure")
+
+# Add tracing to liteLLM.
+tracer_handler = TracerHandler()
+litellm.callbacks.append(tracer_handler)
+
 #############
 ## TESTING ##
 #############
@@ -258,6 +379,21 @@ class SubSubClass(SubClass):
         print("__subclass")
         return b
 
-q = SubSubClass()
-q.f(b=5)
-print(Tracer.events)
+def trace_inner(func):
+    @functools.wraps(func)
+    def inner(*args, **kwargs):
+        print(inspect.getmembers(inner))
+        #inner_functions = [member[1] for member in inspect.getmembers(func, inspect.isfunction) if member[1].__qualname__.startswith(func.__name__+'.')]
+        #print(inner_functions)
+        result = func(*args, **kwargs)
+        return result
+    return inner
+
+@trace_inner
+def main():
+    q = SubSubClass()
+    q.f(b=5)
+    print(Tracer.events)
+
+if __name__ == "__main__":
+    main()

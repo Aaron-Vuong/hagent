@@ -7,11 +7,12 @@ except ImportError: # pragma: no cover
     pyslang = None  # type: ignore
 
 from hagent.tool.compile import Diagnostic
+from hagent.core.tracer import TracerMetaClass
 
 IO = namedtuple('IO', ['name', 'input', 'output', 'bits'])
 
 
-class Compile_slang:
+class Compile_slang(metaclass=TracerMetaClass):
     """
     A HAgent tool pyslang (slang) wrapper to compile and extract information from Verilog.
     """
