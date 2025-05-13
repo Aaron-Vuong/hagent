@@ -240,8 +240,13 @@ class LLM_wrap(metaclass=TracerMetaClass):
 
         # Call litellm
         try:
+            start = time.time()
             r = litellm.completion(**llm_call_args)
-            self.responses.append(r.to_dict())
+            end = time.time()
+            # Augment the litellm.ModelResponse with duration.
+            response = r.to_dict()
+            response['elapsed'] = end - start
+            self.responses.append(response)
         except Exception as e:
             self._set_error(f'litellm call error: {e}')
             data = {'error': self.last_error}
