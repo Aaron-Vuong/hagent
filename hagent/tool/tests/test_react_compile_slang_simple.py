@@ -17,9 +17,8 @@ from hagent.tool.compile_slang import Compile_slang
 from hagent.core.llm_wrap import LLM_wrap
 from hagent.tool.compile import Diagnostic
 from hagent.tool.extract_code import Extract_code_verilog
-from hagent.core.tracer import TracerMetaClass, Tracer
 
-class React_compile_slang(metaclass=TracerMetaClass):
+class React_compile_slang:
     """
     Encapsulates LLM and Compile_slang for iterative Verilog code fixing.
     """

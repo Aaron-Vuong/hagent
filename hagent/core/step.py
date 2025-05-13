@@ -5,6 +5,7 @@ import sys
 import datetime
 import os
 import contextlib
+import time
 
 from ruamel.yaml import YAML
 from ruamel.yaml.scalarstring import LiteralScalarString
@@ -165,6 +166,7 @@ class Step(metaclass=TracerMetaClass):
     def step(self):
         if not self.setup_called:
             raise NotImplementedError('must call setup before step')
+        start = time.time()
         output_data = {}
         try:
             # Set environment variables temporarily before running.
@@ -179,14 +181,17 @@ class Step(metaclass=TracerMetaClass):
             print(f'ERROR: unable to write yaml: {e}')
 
         # Get total cost and tokens if there is any LLM attached
+        # Also get the chat history to dump any relevant stats in the yaml.
         cost = 0.0
         tokens = 0
+        history = []
         for attr_name in dir(self):
             try:
                 attr_value = getattr(self, attr_name)
                 if isinstance(attr_value, LLM_wrap):
                     cost += attr_value.total_cost
                     tokens += attr_value.total_tokens
+                    history = attr_value.responses
             except AttributeError:
                 # Skip attributes that can't be accessed
                 pass
@@ -198,5 +203,12 @@ class Step(metaclass=TracerMetaClass):
             tokens += output_data.get('tokens', 0)
             output_data['tokens'] = tokens
 
+        elapsed = time.time() - start
+        output_data['perfetto'] = {}
+        output_data['perfetto']['start'] = start
+        output_data['perfetto']['elapsed'] = elapsed
+        output_data['perfetto']['input'] = self.input_file
+        output_data['perfetto']['output'] = self.output_file
+        output_data['perfetto']['history'] = history
         self.write_output(output_data)
         return output_data

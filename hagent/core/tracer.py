@@ -266,7 +266,8 @@ class TracerHandler(CustomLogger):
     """
     Custom callback for litellm support.
     """
-    def log_pre_api_call(self, model, messages, kwargs): 
+    def log_pre_api_call(self, model, messages, kwargs):
+        return
         print(f" <--- Pre-API Call")
         # print(f"MODEL: {model}")
         # print(f"MESSAGES: {messages}")
@@ -289,7 +290,8 @@ class TracerHandler(CustomLogger):
         ))
         print(f" ---> Pre-API Call")
     
-    def log_post_api_call(self, kwargs, response_obj, start_time, end_time): 
+    def log_post_api_call(self, kwargs, response_obj, start_time, end_time):
+        return
         print(f" <--- Post-API Call")
         print(f"KWARGS: {kwargs}")
         print(f"RESPONSE_OBJ: {response_obj}")
@@ -298,7 +300,8 @@ class TracerHandler(CustomLogger):
         print(f" ---> Post-API Call")
     
 
-    def log_success_event(self, kwargs, response_obj, start_time, end_time): 
+    def log_success_event(self, kwargs, response_obj, start_time, end_time):
+        return
         print(f" <--- On Success")
         #print(f"KWARGS: {kwargs}")
         duration = (end_time - start_time).total_seconds()
@@ -322,7 +325,8 @@ class TracerHandler(CustomLogger):
         print(f" ---> On Success")
         Tracer.save_perfetto_trace()
 
-    def log_failure_event(self, kwargs, response_obj, start_time, end_time): 
+    def log_failure_event(self, kwargs, response_obj, start_time, end_time):
+        return
         print(f" <--- On Failure")
         print(f"KWARGS: {kwargs}")
         print(f"RESPONSE_OBJ: {response_obj}")
@@ -333,6 +337,7 @@ class TracerHandler(CustomLogger):
     #### ASYNC #### - for acompletion/aembeddings
 
     async def async_log_success_event(self, kwargs, response_obj, start_time, end_time):
+        return
         print(f" <--- On Async Success")
         print(f"KWARGS: {kwargs}")
         print(f"RESPONSE_OBJ: {response_obj}")
@@ -341,6 +346,7 @@ class TracerHandler(CustomLogger):
         print(f" ---> On Async Success")
 
     async def async_log_failure_event(self, kwargs, response_obj, start_time, end_time):
+        return
         print(f" <--- On Async Failure")
         print(f"KWARGS: {kwargs}")
         print(f"RESPONSE_OBJ: {response_obj}")
@@ -349,8 +355,8 @@ class TracerHandler(CustomLogger):
         print(f" ---> On Async Failure")
 
 # Add tracing to liteLLM.
-tracer_handler = TracerHandler()
-litellm.callbacks.append(tracer_handler)
+#tracer_handler = TracerHandler()
+#litellm.callbacks.append(tracer_handler)
 
 #############
 ## TESTING ##

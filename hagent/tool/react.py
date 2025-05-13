@@ -6,7 +6,6 @@ from ruamel.yaml import YAML
 from ruamel.yaml.scalarstring import LiteralScalarString
 
 from hagent.tool.compile import Diagnostic
-from hagent.core.tracer import TracerMetaClass
 
 
 def process_multiline_strings(obj):
@@ -48,7 +47,7 @@ def insert_comment(code: str, add: str, prefix: str, loc: int) -> str:
     return ''.join(code_lines)
 
 
-class React(metaclass=TracerMetaClass):
+class React:
     """
     Handles Re-Act iteration logic for external tools (e.g., compilers).
     Orchestrates iterative error fixing by invoking user-supplied check and fix callbacks.

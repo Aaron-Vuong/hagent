@@ -100,6 +100,7 @@ class LLM_wrap(metaclass=TracerMetaClass):
 
         self.last_error = ''
         self.chat_history = []  # Stores messages as [{"role": "...", "content": "..."}]
+        self.responses = [] # Stores the complete litellm response for tracing LLM calls.
         self.total_cost = 0.0
         self.total_tokens = 0
         self.total_time_ms = 0.0
@@ -240,6 +241,7 @@ class LLM_wrap(metaclass=TracerMetaClass):
         # Call litellm
         try:
             r = litellm.completion(**llm_call_args)
+            self.responses.append(r.to_dict())
         except Exception as e:
             self._set_error(f'litellm call error: {e}')
             data = {'error': self.last_error}
