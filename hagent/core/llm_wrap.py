@@ -245,6 +245,8 @@ class LLM_wrap(metaclass=TracerMetaClass):
             end = time.time()
             # Augment the litellm.ModelResponse with duration.
             response = r.to_dict()
+            # Overwrite the response created time.
+            response['created'] = start
             response['elapsed'] = end - start
             self.responses.append(response)
         except Exception as e:

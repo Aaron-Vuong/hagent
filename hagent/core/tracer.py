@@ -185,7 +185,7 @@ def trace_function(func):
             serialized_args.append(str(arg))
         for key, val in kwargs.items():
             serialized_kwargs[str(key)] = str(val)
-
+        """
         Tracer.log(TraceEvent(
             name = func.__name__,
             cat = "hagent",
@@ -202,6 +202,7 @@ def trace_function(func):
             },
             dur = s_to_us(end_time - start_time),
         ))
+        """
         return result
     return inner
 

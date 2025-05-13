@@ -167,7 +167,7 @@ class Step(metaclass=TracerMetaClass):
         if not self.setup_called:
             raise NotImplementedError('must call setup before step')
         start = time.time()
-        output_data = {}
+        output_data = {"step": type(self).__name__}
         try:
             # Set environment variables temporarily before running.
             with self.temporary_env_vars():
