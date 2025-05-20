@@ -66,8 +66,8 @@ def parse_yaml_files(yaml_files: List[str]) -> Tuple[set, set, set]:
         yaml_files: The list of relevant YAML files to include in the trace.
     
     Returns:
-        The dependencies files listed in each YAML under data['perfetto']['input']
-        or data['perfetto']['output'].
+        The dependencies files listed in each YAML under data['tracing']['input']
+        or data['tracing']['output'].
 
     """
     step = Step()
@@ -81,30 +81,30 @@ def parse_yaml_files(yaml_files: List[str]) -> Tuple[set, set, set]:
         if data.keys == ["error"]:
             logger.exception("Failure detected in step!")
 
-        # If there is no 'perfetto' key, it may be one of two cases.
+        # If there is no 'tracing' key, it may be one of two cases.
         # - Initial input YAML
         # - Non-relevant YAML
-        if data.get("perfetto", None) is None:
+        if data.get('tracing', None) is None:
             initial.add(os.path.basename(f))
             continue
 
         # Track the inputs/output YAMLs.
-        inputs.add(data["perfetto"]["input"])
-        outputs.add(data["perfetto"]["output"])
+        inputs.add(data['tracing']["input"])
+        outputs.add(data['tracing']["output"])
         # Log the Step itself.
         Tracer.log(TraceEvent(
             name = data["step"],
             cat = "hagent",
             ph = PhaseType.COMPLETE,
-            ts = s_to_us(data["perfetto"]["start"]),
+            ts = s_to_us(data['tracing']["start"]),
             pid = HAGENT_PID,
             tid = HAGENT_TID,
-            dur = s_to_us(data["perfetto"]["elapsed"]),
+            dur = s_to_us(data['tracing']["elapsed"]),
         ))
 
         # Log any LLM calls made by LLM_wrap during the Step.
-        if data["perfetto"].get("history", None):
-            for llm_call in data["perfetto"]["history"]:
+        if data['tracing'].get("history", None):
+            for llm_call in data['tracing']["history"]:
                 Tracer.log(TraceEvent(
                     name = llm_call["id"],
                     cat = "llm",
@@ -116,8 +116,8 @@ def parse_yaml_files(yaml_files: List[str]) -> Tuple[set, set, set]:
                 ))
 
         # Log any TraceEvents recorded during the Step.
-        if data["perfetto"].get("trace_events", None):
-            for trace_event in data["perfetto"]["trace_events"]:
+        if data['tracing'].get("trace_events", None):
+            for trace_event in data['tracing']["trace_events"]:
                 Tracer.log(TraceEvent(**trace_event))
 
     return (initial, inputs, outputs)
@@ -151,24 +151,24 @@ def draw_dependencies(yaml_files: List[str], dependencies: Tuple[set, set, set])
 
         # If the input of this Step was an initial configuration file,
         # this step has no dependencies.
-        if data["perfetto"]["input"] in initial:
+        if data['tracing']["input"] in initial:
             Tracer.log(TraceEvent(
                 name = flow_name,
                 cat = "hagent",
                 ph = PhaseType.FLOW_START,
-                ts = s_to_us(data["perfetto"]["start"]),
+                ts = s_to_us(data['tracing']["start"]),
                 pid = HAGENT_PID,
                 tid = HAGENT_TID,
                 id = 1)
             )
         # If the output of this Step was an input of another Step,
         # then we know this is an intermediate Step.
-        elif data["perfetto"]["output"] in inputs:
+        elif data['tracing']["output"] in inputs:
             Tracer.log(TraceEvent(
                 name = flow_name,
                 cat = "hagent",
                 ph = PhaseType.FLOW_STEP,
-                ts = s_to_us(data["perfetto"]["start"]),
+                ts = s_to_us(data['tracing']["start"]),
                 pid = HAGENT_PID,
                 tid = HAGENT_TID,
                 id = 1)
@@ -178,7 +178,7 @@ def draw_dependencies(yaml_files: List[str], dependencies: Tuple[set, set, set])
                 name = flow_name,
                 cat = "hagent",
                 ph = PhaseType.FLOW_END,
-                ts = s_to_us(data["perfetto"]["start"]),
+                ts = s_to_us(data['tracing']["start"]),
                 pid = HAGENT_PID,
                 tid = HAGENT_TID,
                 id = 1,

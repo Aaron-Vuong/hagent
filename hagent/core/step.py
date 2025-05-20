@@ -163,6 +163,16 @@ class Step:
         self.write_output(output_data)
         raise ValueError(msg)
 
+    def augment_output_data(self, output_data: dict, start: float, elapsed: float, history: list):
+        output_data["step"] = self.__class__.__name__
+        output_data['tracing'] = {}
+        output_data['tracing']['start'] = start
+        output_data['tracing']['elapsed'] = elapsed
+        output_data['tracing']['input'] = self.input_file
+        output_data['tracing']['output'] = self.output_file
+        output_data['tracing']['trace_events'] = Tracer.get_events()
+        output_data['tracing']['history'] = history
+
     def step(self):
         if not self.setup_called:
             raise NotImplementedError('must call setup before step')
@@ -205,13 +215,6 @@ class Step:
 
         elapsed = time.time() - start
         # Ensure that all relevant tracing attributes are accurate for this Step.
-        output_data["step"] = self.__class__.__name__
-        output_data['perfetto'] = {}
-        output_data['perfetto']['start'] = start
-        output_data['perfetto']['elapsed'] = elapsed
-        output_data['perfetto']['input'] = self.input_file
-        output_data['perfetto']['output'] = self.output_file
-        output_data['perfetto']['trace_events'] = Tracer.get_events()
-        output_data['perfetto']['history'] = history
+        self.augment_output_data(output_data, start, elapsed, history)
         self.write_output(output_data)
         return output_data
