@@ -24,6 +24,7 @@ from hagent.core.tracer import (
     Tracer,
     TraceEvent,
     s_to_us,
+    read_yaml,
 )
 
 logger = logging.getLogger(__name__)
@@ -70,14 +71,12 @@ def parse_yaml_files(yaml_files: List[str]) -> Tuple[set, set, set]:
         or data['tracing']['output'].
 
     """
-    step = Step()
-
     initial = set()
     inputs = set()
     outputs = set()
+    step_id = 0
     for idx, f in enumerate(yaml_files):
-        step.input_file = f
-        data = step.read_input()
+        data = read_yaml(f)
         if data.keys == ["error"]:
             logger.exception("Failure detected in step!")
 
@@ -92,15 +91,10 @@ def parse_yaml_files(yaml_files: List[str]) -> Tuple[set, set, set]:
         inputs.add(data['tracing']["input"])
         outputs.add(data['tracing']["output"])
         # Log the Step itself.
-        Tracer.log(TraceEvent(
-            name = data["step"],
-            cat = "hagent",
-            ph = PhaseType.COMPLETE,
-            ts = s_to_us(data['tracing']["start"]),
-            pid = HAGENT_PID,
-            tid = HAGENT_TID,
-            dur = s_to_us(data['tracing']["elapsed"]),
-        ))
+
+        # Start from the __init__
+        ts = data['tracing']['trace_events'][0]["ts"]
+        additional_dur = data['tracing']['start'] - ts
 
         # Log any LLM calls made by LLM_wrap during the Step.
         if data['tracing'].get("history", None):
@@ -112,78 +106,55 @@ def parse_yaml_files(yaml_files: List[str]) -> Tuple[set, set, set]:
                     ts = s_to_us(llm_call["created"]),
                     pid = LLM_PID,
                     tid = LLM_TID,
+                    args = {
+                        "step_id": step_id,
+                        "data": llm_call
+                    },
                     dur = s_to_us(llm_call["elapsed"]),
                 ))
 
         # Log any TraceEvents recorded during the Step.
         if data['tracing'].get("trace_events", None):
             for trace_event in data['tracing']["trace_events"]:
+                trace_event["args"]["step_id"] = step_id
                 Tracer.log(TraceEvent(**trace_event))
 
+
+        # Log the actual step() call.
+        Tracer.log(TraceEvent(
+            name = f"{data['step']}::step",
+            cat = "hagent",
+            ph = PhaseType.COMPLETE,
+            ts = data['tracing']["start"],
+            pid = HAGENT_PID,
+            tid = HAGENT_TID,
+            args = {
+                "step_id": step_id,
+            },
+            dur = data['tracing']["elapsed"],
+        ))
+
+        # Then log the overarching Step execution.
+        ## We add a slight offset (0.3 us) so that Flow events
+        ## can pick up the overall Step instead of the __init__
+        ## function.
+        marker_offset = 0.3
+        Tracer.log(TraceEvent(
+            name = data["step"],
+            cat = "hagent.step",
+            ph = PhaseType.COMPLETE,
+            ts = ts - marker_offset,
+            pid = HAGENT_PID,
+            tid = HAGENT_TID,
+            args = {
+                "step_id": step_id,
+                "data": data
+            },
+            dur = data['tracing']["elapsed"] + additional_dur + marker_offset,
+        ))
+
+        step_id += 1
     return (initial, inputs, outputs)
-
-def draw_dependencies(yaml_files: List[str], dependencies: Tuple[set, set, set]):
-    """
-    Parses the YAML files for the initial hierarchy of Steps + Tool Calls.
-
-    Args:
-        yaml_files: The list of relevant YAML files to include in the trace.
-
-    """
-    step = Step()
-
-    initial, inputs, _ = dependencies
-    for _, f in enumerate(yaml_files):
-        if os.path.basename(f) in initial:
-            continue
-
-        step.input_file = f
-        data = step.read_input()
-        if data.keys == ["error"]:
-            logger.exception("Failure detected in step!")
-
-
-        # TODO: If input is multiple YAMLs, we should use set intersection.
-        # If the set intersection yields at least one element, we have a dependency.
-
-        # TODO: figure out support for multi-pipe flows.
-        flow_name = "pipe"
-
-        # If the input of this Step was an initial configuration file,
-        # this step has no dependencies.
-        if data['tracing']["input"] in initial:
-            Tracer.log(TraceEvent(
-                name = flow_name,
-                cat = "hagent",
-                ph = PhaseType.FLOW_START,
-                ts = s_to_us(data['tracing']["start"]),
-                pid = HAGENT_PID,
-                tid = HAGENT_TID,
-                id = 1)
-            )
-        # If the output of this Step was an input of another Step,
-        # then we know this is an intermediate Step.
-        elif data['tracing']["output"] in inputs:
-            Tracer.log(TraceEvent(
-                name = flow_name,
-                cat = "hagent",
-                ph = PhaseType.FLOW_STEP,
-                ts = s_to_us(data['tracing']["start"]),
-                pid = HAGENT_PID,
-                tid = HAGENT_TID,
-                id = 1)
-            )
-        else:
-            Tracer.log(TraceEvent(
-                name = flow_name,
-                cat = "hagent",
-                ph = PhaseType.FLOW_END,
-                ts = s_to_us(data['tracing']["start"]),
-                pid = HAGENT_PID,
-                tid = HAGENT_TID,
-                id = 1,
-                bp="e")
-            )
 
 def generate_perfetto_trace(yaml_files: List[str], output_file: str, asynchronous: bool):
     """
@@ -203,11 +174,10 @@ def generate_perfetto_trace(yaml_files: List[str], output_file: str, asynchronou
     logger.debug(f"Input YAML files: %s", inputs)
     logger.debug(f"Output YAML files: %s", outputs)
 
-    # Log the dependency flow.
-    # This draws an arrow going from the input to the output.
-    draw_dependencies(yaml_files, (initial, inputs, outputs))
-
-    Tracer.save_perfetto_trace(output_file, not asynchronous)
+    Tracer.save_perfetto_trace(
+        dependencies=(initial, inputs, outputs),
+        filename=output_file,
+        asynchronous=asynchronous)
 
 def main():
     parser = parse_arguments()

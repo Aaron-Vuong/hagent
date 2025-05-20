@@ -12,7 +12,7 @@ from ruamel.yaml.scalarstring import LiteralScalarString
 
 from hagent.core.llm_wrap import dict_deep_merge
 from hagent.core.llm_wrap import LLM_wrap
-from hagent.core.tracer import Tracer
+from hagent.core.tracer import Tracer, TracerMetaClass, s_to_us
 
 def wrap_literals(obj):
     # Recursively wrap multiline strings as LiteralScalarString for nicer YAML output.
@@ -26,7 +26,7 @@ def wrap_literals(obj):
         return obj
 
 
-class Step:
+class Step(metaclass=TracerMetaClass):
     def __init__(self):
         self.input_file = None
         self.output_file = None
@@ -166,8 +166,8 @@ class Step:
     def augment_output_data(self, output_data: dict, start: float, elapsed: float, history: list):
         output_data["step"] = self.__class__.__name__
         output_data['tracing'] = {}
-        output_data['tracing']['start'] = start
-        output_data['tracing']['elapsed'] = elapsed
+        output_data['tracing']['start'] = s_to_us(start)
+        output_data['tracing']['elapsed'] = s_to_us(elapsed)
         output_data['tracing']['input'] = self.input_file
         output_data['tracing']['output'] = self.output_file
         output_data['tracing']['trace_events'] = Tracer.get_events()

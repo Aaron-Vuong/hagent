@@ -8,9 +8,13 @@ import time
 
 from abc import ABCMeta
 from enum import Enum
-from typing import List
+from typing import (
+    List,
+    Tuple,
+)
 
 from litellm.integrations.custom_logger import CustomLogger
+from ruamel.yaml import YAML
 
 # Keep everything under specific tabs in the Perfetto timeline.
 HAGENT_PID = 0
@@ -33,6 +37,26 @@ class Encoder(json.JSONEncoder):
         elif isinstance(o, str):
             return o.encode('unicode_escape').decode('ascii')
         return super().default(o)
+
+def read_yaml(input_file: str) -> dict:
+    """
+    Reads an input YAML file and attempts to convert it to a Python dictionary.
+
+    Args:
+        input_file: The input YAML file to convert to a dictionary.
+
+    Returns:
+        A dictionary representation of the YAML file.
+        If loading fails, a dictionary with 'error' as its only key is returned instead.
+
+    """
+    try:
+        yaml_obj = YAML(typ='safe')
+        with open(input_file, 'r') as f:
+            data = yaml_obj.load(f)
+    except Exception:
+        return {'error': ''}
+    return data
 
 #####################
 ## TRACER PERFETTO ##
@@ -116,7 +140,23 @@ class Tracer:
     Singleton event handler for TraceEvents.
     """
     events = []
+    enabled = True
+
+    @classmethod
+    def disable(cls):
+        """
+        Disables any tracing for this execution.
+        """
+        cls.enabled = False
+        cls.events.clear()
     
+    @classmethod
+    def enable(cls):
+        """
+        Enables any tracing for this execution.
+        """
+        cls.enabled = True
+
     @classmethod
     def get_events(cls) -> List[TraceEvent]:
         """
@@ -129,44 +169,113 @@ class Tracer:
         """
         Add a new event.
         """
-        cls.events.append(event)
+        if cls.enabled:
+            cls.events.append(event)
 
     @classmethod
-    def add_flow_events(cls):
+    def add_flow_events(cls, dependencies: Tuple[set, set, set]):
         """
         Adds the Flow TraceEvents to provide relations between events.
+
+        Args:
+            dependencies: Three sets of YAML files
+            - initial YAML files (no dependencies)
+            - input YAML files (input(s) to a Step),
+            - output files (output of a Step).
+
         """
-        raise NotImplementedError
-    
+        initial, inputs, outputs = dependencies
+        print(initial)
+        pipe_id = 0
+        # Each non-initial YAML file is a record of a Step execution.
+        for event in cls.events:
+            if event.cat != "hagent.step":
+                continue
+            data = event.args["data"]
+            if data.keys == ["error"]:
+                print("Failure detected in step!")
+                continue
+
+            # TODO: figure out support for multi-pipe flows.
+            flow_name = f"pipe_{pipe_id}"
+
+            # If the input of this Step was an initial configuration file,
+            # this step has no dependencies.
+
+            # This will automatically create an array of input files if one was not given.
+            if isinstance(data['tracing']['input'], str):
+                data['tracing']['input'] = [data['tracing']['input']]
+
+            print(f"INPUTS: {set(data['tracing']['input'])}: {set(data['tracing']['input']).intersection(initial)}")
+            if set(data['tracing']['input']).intersection(initial):
+                Tracer.log(TraceEvent(
+                    name = flow_name,
+                    cat = "hagent",
+                    ph = PhaseType.FLOW_START,
+                    ts = event.ts,
+                    pid = HAGENT_PID,
+                    tid = event.tid,
+                    id = pipe_id)
+                )
+            # If the output of this Step was an input of another Step,
+            # then we know this is an intermediate Step.
+            elif data['tracing']["output"] in inputs:
+                Tracer.log(TraceEvent(
+                    name = flow_name,
+                    cat = "hagent",
+                    ph = PhaseType.FLOW_STEP,
+                    ts = event.ts,
+                    pid = HAGENT_PID,
+                    tid = event.tid,
+                    id = pipe_id)
+                )
+            else:
+                Tracer.log(TraceEvent(
+                    name = flow_name,
+                    cat = "hagent",
+                    ph = PhaseType.FLOW_END,
+                    ts = event.ts,
+                    pid = HAGENT_PID,
+                    tid = event.tid,
+                    id = pipe_id,
+                    bp="e")
+                )
+
     @classmethod
-    def add_metadata(cls):
+    def add_metadata(cls, asynchronous: bool):
         """
         Adds metadata events to rename and prettify the Perfetto Trace.
         """
         # Add thread names.
-        Tracer.log(TraceEvent(
-            name = "thread_name",
-            cat = "__metadata",
-            ph = PhaseType.METADATA,
-            ts = 0,
-            pid = HAGENT_PID,
-            tid = HAGENT_TID,
-            args = {
-                "name": "Pipe"
-            },
-        ))
-        Tracer.log(TraceEvent(
-            name = "thread_name",
-            cat = "__metadata",
-            ph = PhaseType.METADATA,
-            ts = 0,
-            pid = LLM_PID,
-            tid = LLM_TID,
-            args = {
-                "name": "LLM_Completions"
-            },
-        ))
+        thread_metadata = []
+        for event in cls.events:
+            if event.cat != "hagent.step":
+                continue
+            # TODO: Handle multi-thread.
 
+        if not thread_metadata:
+            Tracer.log(TraceEvent(
+                name = "thread_name",
+                cat = "__metadata",
+                ph = PhaseType.METADATA,
+                ts = 0,
+                pid = HAGENT_PID,
+                tid = HAGENT_TID,
+                args = {
+                    "name": "Pipe"
+                },
+            ))
+            Tracer.log(TraceEvent(
+                name = "thread_name",
+                cat = "__metadata",
+                ph = PhaseType.METADATA,
+                ts = 0,
+                pid = LLM_PID,
+                tid = LLM_TID,
+                args = {
+                    "name": "LLM_Completions"
+                },
+            ))
 
         # Name overarching categories (Hagent + LLM).
         Tracer.log(TraceEvent(
@@ -193,32 +302,50 @@ class Tracer:
         ))
     
     @classmethod
-    def create_asynchronous_trace():
+    def create_asynchronous_trace(cls, dependencies: Tuple[set, set, set]):
         """
         Creates an asynchronous trace from the recorded events.
+
+        Args:
+            dependencies: Three sets of YAML files
+            - initial YAML files (no dependencies)
+            - input YAML files (input(s) to a Step),
+            - output files (output of a Step).
+
         """
+        # Put every Step into a separate thread.
+        steps = []
+        # Collect all Steps.
+        for event in cls.events:
+            if event.cat == "hagent.step":
+                steps.append(event)
+
+        # Align timestamps to the same level in the dependency tree.
+        for event in cls.events:
+            event.tid = event["args"]["step_id"]
+
         raise NotImplementedError
 
     @classmethod
-    def save_perfetto_trace(cls, filename: str=None, synchronous: bool=True):
+    def save_perfetto_trace(cls, dependencies: Tuple[set, set, set], filename: str=None, asynchronous: bool=False):
         """
         Saves the events off in a Perfetto-compatible JSON file.
 
         Args:
-            synchronous: Dump a trace where all events are displayed as recorded.
-                         If not, the trace will do a best-effort re-ordering to depict
+            asynchronous: Dump a trace where all events are not displayed as recorded.
+                         The trace will do a best-effort re-ordering to depict
                          a fully asynchronous run.
 
         """
         if filename is None:
             filename = "hagent.json"
         # TODO: Modify the TraceEvents to be fully parallelized.
-        if not synchronous:
+        if asynchronous:
             cls.create_asynchronous_trace()
         # Add necessary metadata to visualize each event nicely.
-        cls.add_metadata()
-        # TODO: Add Flow TraceEvents to depict how each step flows into the next.
-        #cls.add_flow_events()
+        cls.add_metadata(asynchronous)
+        # Add Flow TraceEvents to depict how each step flows into the next.
+        cls.add_flow_events(dependencies)
 
         with open(filename, "w+", encoding="utf-8") as f:
             json.dump({
@@ -277,6 +404,7 @@ class TracerMetaClass(type):
         - Total time for a function taken.
         - Input arguments.
         - Output arguments.
+
         This allows us to track what functions are dependent on while being minimally invasive to the codebase.
         This also allows us to track overall function time for each function.
 
