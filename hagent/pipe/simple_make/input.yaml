@@ -1,8 +1,11 @@
-code: |
-  void main() {
-    for(int i=0;i<2;i++)
-      printf("hello world\n");
-  }
+code_content: |
+  module and_gate_behavioral(output reg Y, input A, input B);
+      always @(A or B) begin
+          Y = A & B;
+      end
+  endmodule
+
+top_name: "and_gate_behavioral"
 
 llm:
   model: "fireworks_ai/accounts/fireworks/models/llama-v3p2-3b-instruct" # Cheap fireworks model
