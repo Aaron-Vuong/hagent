@@ -18,6 +18,7 @@ from hagent.core.llm_wrap import LLM_wrap
 from hagent.tool.compile import Diagnostic
 from hagent.tool.extract_code import Extract_code_verilog
 
+
 class React_compile_slang:
     """
     Encapsulates LLM and Compile_slang for iterative Verilog code fixing.
@@ -204,6 +205,7 @@ def main():
     print('Fixed Verilog code:')
     print(fixed_code)
     sys.exit(0)
+
 
 if __name__ == '__main__':
     main()
