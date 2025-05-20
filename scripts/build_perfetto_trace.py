@@ -10,12 +10,16 @@ from typing import (
     Any,
     Dict,
     List,
+    Tuple,
 )
 
 from hagent.core.step import Step
 from hagent.core.tracer import (
-    HAGENT_ID,
-    LLM_ID,
+    HAGENT_PID,
+    LLM_PID,
+    HAGENT_TID,
+    LLM_TID,
+    METADATA_TID,
     PhaseType,
     Tracer,
     TraceEvent,
@@ -54,19 +58,20 @@ def scan_for_files(run_dir: str) -> List[str]:
 def get_data_from_yaml(yaml_f: str) -> Dict[Any, Any]:
     return
 
-def generate_perfetto_trace(yaml_files: List[str], output_file: str, asynchronous: bool):
+def parse_yaml_files(yaml_files: List[str]) -> Tuple[set, set, set]:
     """
-    Generates a Perfetto Trace given all relevant YAML files.
+    Parses the YAML files for the initial hierarchy of Steps + Tool Calls.
 
     Args:
         yaml_files: The list of relevant YAML files to include in the trace.
-        output_file: The output file to dump the Perfetto Trace to.
-        asynchronous: Disregard the actual execution and display an asynchronous ordering.
+    
+    Returns:
+        The dependencies files listed in each YAML under data['perfetto']['input']
+        or data['perfetto']['output'].
 
     """
     step = Step()
 
-    # Initial YAMLs used as inputs for a Pipe.
     initial = set()
     inputs = set()
     outputs = set()
@@ -92,8 +97,8 @@ def generate_perfetto_trace(yaml_files: List[str], output_file: str, asynchronou
             cat = "hagent",
             ph = PhaseType.COMPLETE,
             ts = s_to_us(data["perfetto"]["start"]),
-            pid = HAGENT_ID,
-            tid = 0,
+            pid = HAGENT_PID,
+            tid = HAGENT_TID,
             dur = s_to_us(data["perfetto"]["elapsed"]),
         ))
 
@@ -102,20 +107,32 @@ def generate_perfetto_trace(yaml_files: List[str], output_file: str, asynchronou
             for llm_call in data["perfetto"]["history"]:
                 Tracer.log(TraceEvent(
                     name = llm_call["id"],
-                    cat = "hagent",
+                    cat = "llm",
                     ph = PhaseType.COMPLETE,
                     ts = s_to_us(llm_call["created"]),
-                    pid = LLM_ID,
-                    tid = 0,
+                    pid = LLM_PID,
+                    tid = LLM_TID,
                     dur = s_to_us(llm_call["elapsed"]),
                 ))
 
-    logger.debug(f"Initial YAML files: %s", initial)
-    logger.debug(f"Input YAML files: %s", inputs)
-    logger.debug(f"Output YAML files: %s", outputs)
+        # Log any TraceEvents recorded during the Step.
+        if data["perfetto"].get("trace_events", None):
+            for trace_event in data["perfetto"]["trace_events"]:
+                Tracer.log(TraceEvent(**trace_event))
 
-    # Log the dependency flow.
-    # This draws an arrow going from the input to the output.
+    return (initial, inputs, outputs)
+
+def draw_dependencies(yaml_files: List[str], dependencies: Tuple[set, set, set]):
+    """
+    Parses the YAML files for the initial hierarchy of Steps + Tool Calls.
+
+    Args:
+        yaml_files: The list of relevant YAML files to include in the trace.
+
+    """
+    step = Step()
+
+    initial, inputs, _ = dependencies
     for _, f in enumerate(yaml_files):
         if os.path.basename(f) in initial:
             continue
@@ -140,8 +157,8 @@ def generate_perfetto_trace(yaml_files: List[str], output_file: str, asynchronou
                 cat = "hagent",
                 ph = PhaseType.FLOW_START,
                 ts = s_to_us(data["perfetto"]["start"]),
-                pid = HAGENT_ID,
-                tid = 0,
+                pid = HAGENT_PID,
+                tid = HAGENT_TID,
                 id = 1)
             )
         # If the output of this Step was an input of another Step,
@@ -152,8 +169,8 @@ def generate_perfetto_trace(yaml_files: List[str], output_file: str, asynchronou
                 cat = "hagent",
                 ph = PhaseType.FLOW_STEP,
                 ts = s_to_us(data["perfetto"]["start"]),
-                pid = HAGENT_ID,
-                tid = 0,
+                pid = HAGENT_PID,
+                tid = HAGENT_TID,
                 id = 1)
             )
         else:
@@ -162,11 +179,33 @@ def generate_perfetto_trace(yaml_files: List[str], output_file: str, asynchronou
                 cat = "hagent",
                 ph = PhaseType.FLOW_END,
                 ts = s_to_us(data["perfetto"]["start"]),
-                pid = HAGENT_ID,
-                tid = 0,
+                pid = HAGENT_PID,
+                tid = HAGENT_TID,
                 id = 1,
                 bp="e")
             )
+
+def generate_perfetto_trace(yaml_files: List[str], output_file: str, asynchronous: bool):
+    """
+    Generates a Perfetto Trace given all relevant YAML files.
+
+    Args:
+        yaml_files: The list of relevant YAML files to include in the trace.
+        output_file: The output file to dump the Perfetto Trace to.
+        asynchronous: Disregard the actual execution and display an asynchronous ordering.
+
+    """
+
+    # Initial YAMLs used as inputs for a Pipe.
+    initial, inputs, outputs = parse_yaml_files(yaml_files)
+
+    logger.debug(f"Initial YAML files: %s", initial)
+    logger.debug(f"Input YAML files: %s", inputs)
+    logger.debug(f"Output YAML files: %s", outputs)
+
+    # Log the dependency flow.
+    # This draws an arrow going from the input to the output.
+    draw_dependencies(yaml_files, (initial, inputs, outputs))
 
     Tracer.save_perfetto_trace(output_file, not asynchronous)
 

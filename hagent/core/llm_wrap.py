@@ -9,7 +9,6 @@ from ruamel.yaml import YAML
 from ruamel.yaml.scalarstring import LiteralScalarString
 
 from hagent.core.llm_template import LLM_template
-from hagent.core.tracer import TracerMetaClass
 
 
 def dict_deep_merge(dict1: Dict, dict2: Dict) -> Dict:
@@ -33,7 +32,7 @@ def dict_deep_merge(dict1: Dict, dict2: Dict) -> Dict:
     return dict1
 
 
-class LLM_wrap(metaclass=TracerMetaClass):
+class LLM_wrap:
     def load_config(self) -> Dict:
         if not os.path.exists(self.conf_file):
             self._set_error(f'unable to read conf_file: {self.conf_file}')
@@ -77,7 +76,7 @@ class LLM_wrap(metaclass=TracerMetaClass):
         elif model.startswith('openrouter'):
             required_key = 'OPENROUTER_API_KEY'
         elif model.startswith('ollama'):
-            # Ollama access is achieved through URL such as 'http://localhost:11434'
+            # Ollama access is achieved through a URL such as 'http://localhost:11434'
             required_key = 'OLLAMA_API_BASE'
         # Add more providers as needed...
         else:
@@ -245,7 +244,7 @@ class LLM_wrap(metaclass=TracerMetaClass):
             end = time.time()
             # Augment the litellm.ModelResponse with duration.
             response = r.to_dict()
-            # Overwrite the response created time.
+            # Overwrite the response 'created' time to get matching sub-second accuracy.
             response['created'] = start
             response['elapsed'] = end - start
             self.responses.append(response)

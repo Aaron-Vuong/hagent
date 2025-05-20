@@ -8,12 +8,16 @@ import time
 
 from abc import ABCMeta
 from enum import Enum
+from typing import List
 
 from litellm.integrations.custom_logger import CustomLogger
 
-# Keep everything under one tab in the Perfetto timeline.
-HAGENT_ID = 10
-LLM_ID = 11
+# Keep everything under specific tabs in the Perfetto timeline.
+HAGENT_PID = 0
+HAGENT_TID = 0
+LLM_PID = 1
+LLM_TID = 1
+METADATA_TID = 2
 
 def s_to_us(s: float) -> float:
     """
@@ -70,6 +74,10 @@ class TraceEvent:
             pid: int,
             tid: int,
             **kwargs):
+        
+        if isinstance(ph, str):
+            ph = PhaseType(ph)
+
         self.name = name
         self.cat = cat
         self.ph = ph
@@ -93,6 +101,7 @@ class TraceEvent:
         for key, val in self.__dict__.items():
             if val is not None:
                 pruned_d[key] = val
+        pruned_d["ph"] = pruned_d["ph"].value
         return pruned_d
 
     def __str__(self) -> str:
@@ -109,6 +118,13 @@ class Tracer:
     events = []
     
     @classmethod
+    def get_events(cls) -> List[TraceEvent]:
+        """
+        Gets the event trace.
+        """
+        return [event.to_json() for event in cls.events]
+
+    @classmethod
     def log(cls, event: TraceEvent):
         """
         Add a new event.
@@ -123,11 +139,58 @@ class Tracer:
         raise NotImplementedError
     
     @classmethod
-    def add_metadata():
+    def add_metadata(cls):
         """
         Adds metadata events to rename and prettify the Perfetto Trace.
         """
-        raise NotImplementedError
+        # Add thread names.
+        Tracer.log(TraceEvent(
+            name = "thread_name",
+            cat = "__metadata",
+            ph = PhaseType.METADATA,
+            ts = 0,
+            pid = HAGENT_PID,
+            tid = HAGENT_TID,
+            args = {
+                "name": "Pipe"
+            },
+        ))
+        Tracer.log(TraceEvent(
+            name = "thread_name",
+            cat = "__metadata",
+            ph = PhaseType.METADATA,
+            ts = 0,
+            pid = LLM_PID,
+            tid = LLM_TID,
+            args = {
+                "name": "LLM_Completions"
+            },
+        ))
+
+
+        # Name overarching categories (Hagent + LLM).
+        Tracer.log(TraceEvent(
+            name = "process_name",
+            cat = "__metadata",
+            ph = PhaseType.METADATA,
+            ts = 0,
+            pid = HAGENT_PID,
+            tid = METADATA_TID,
+            args = {
+                "name":"Hagent"
+            },
+        ))
+        Tracer.log(TraceEvent(
+            name = "process_name",
+            cat = "__metadata",
+            ph = PhaseType.METADATA,
+            ts = 0,
+            pid = LLM_PID,
+            tid = METADATA_TID,
+            args = {
+                "name": "LiteLLM"
+            },
+        ))
     
     @classmethod
     def create_asynchronous_trace():
@@ -152,8 +215,8 @@ class Tracer:
         # TODO: Modify the TraceEvents to be fully parallelized.
         if not synchronous:
             cls.create_asynchronous_trace()
-        # TODO: Add necessary metadata to visualize each event nicely.
-        #cls.add_metadata()
+        # Add necessary metadata to visualize each event nicely.
+        cls.add_metadata()
         # TODO: Add Flow TraceEvents to depict how each step flows into the next.
         #cls.add_flow_events()
 
@@ -176,7 +239,6 @@ def trace_function(func):
         end_time = time.time()
         # Mark each function as a complete step.
         # We can augment the log with Flow comments later on.
-        # TODO: Check with prof if we want this to use the standard 'logging' module.
         
         # Ensure all arguments (*args, **kwargs) are JSON serializable.
         serialized_args = []
@@ -185,14 +247,14 @@ def trace_function(func):
             serialized_args.append(str(arg))
         for key, val in kwargs.items():
             serialized_kwargs[str(key)] = str(val)
-        """
+
         Tracer.log(TraceEvent(
-            name = func.__name__,
+            # This is C++ syntax, but it is a nice, clean way to show a class::method relationship.
+            name = f"{args[0].__class__.__name__}::{func.__name__}",
             cat = "hagent",
             ph = PhaseType.COMPLETE,
-            ts = s_to_us(time.time()),
-            pid = HAGENT_ID,
-            # TODO: Investigate using something else?
+            ts = s_to_us(start_time),
+            pid = HAGENT_PID,
             tid = threading.get_ident(),
             args = {
                 "func": func.__name__,
@@ -202,7 +264,7 @@ def trace_function(func):
             },
             dur = s_to_us(end_time - start_time),
         ))
-        """
+
         return result
     return inner
 
@@ -221,7 +283,7 @@ class TracerMetaClass(type):
         Ensure that all decorators do not obscure decorated function names (i.e. use functools.wraps(func)). This
         allows the appropriate function name to be displayed in the trace.
 
-        You could also do this by adding cProfile or any other visualizer.
+        You could also do this by generating a cProfile and use another visualizer.
 
         Example usage that will auto-magically add tracing decorators:
             class BaseClass(metaclass=TracerMetaClass):

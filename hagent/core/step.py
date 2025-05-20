@@ -12,7 +12,7 @@ from ruamel.yaml.scalarstring import LiteralScalarString
 
 from hagent.core.llm_wrap import dict_deep_merge
 from hagent.core.llm_wrap import LLM_wrap
-from hagent.core.tracer import TracerMetaClass
+from hagent.core.tracer import Tracer
 
 def wrap_literals(obj):
     # Recursively wrap multiline strings as LiteralScalarString for nicer YAML output.
@@ -26,7 +26,7 @@ def wrap_literals(obj):
         return obj
 
 
-class Step(metaclass=TracerMetaClass):
+class Step:
     def __init__(self):
         self.input_file = None
         self.output_file = None
@@ -167,7 +167,7 @@ class Step(metaclass=TracerMetaClass):
         if not self.setup_called:
             raise NotImplementedError('must call setup before step')
         start = time.time()
-        output_data = {"step": type(self).__name__}
+        output_data = {}
         try:
             # Set environment variables temporarily before running.
             with self.temporary_env_vars():
@@ -204,11 +204,14 @@ class Step(metaclass=TracerMetaClass):
             output_data['tokens'] = tokens
 
         elapsed = time.time() - start
+        # Ensure that all relevant tracing attributes are accurate for this Step.
+        output_data["step"] = self.__class__.__name__
         output_data['perfetto'] = {}
         output_data['perfetto']['start'] = start
         output_data['perfetto']['elapsed'] = elapsed
         output_data['perfetto']['input'] = self.input_file
         output_data['perfetto']['output'] = self.output_file
+        output_data['perfetto']['trace_events'] = Tracer.get_events()
         output_data['perfetto']['history'] = history
         self.write_output(output_data)
         return output_data
