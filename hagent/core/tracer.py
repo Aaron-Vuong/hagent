@@ -185,7 +185,6 @@ class Tracer:
 
         """
         initial, inputs, outputs = dependencies
-        print(initial)
         pipe_id = 0
         # Each non-initial YAML file is a record of a Step execution.
         for event in cls.events:
@@ -247,24 +246,37 @@ class Tracer:
         Adds metadata events to rename and prettify the Perfetto Trace.
         """
         # Add thread names.
-        thread_metadata = []
         for event in cls.events:
             if event.cat != "hagent.step":
                 continue
-            # TODO: Handle multi-thread.
+            # Handle multi-thread.
+            if asynchronous:
+                Tracer.log(TraceEvent(
+                    name = "thread_name",
+                    cat = "__metadata",
+                    ph = PhaseType.METADATA,
+                    ts = 0,
+                    pid = event.pid,
+                    tid = event.tid,
+                    args = {
+                        "name": event.name
+                    },
+                ))
+            else:
+                # Default name for non-multi-threaded cases.
+                Tracer.log(TraceEvent(
+                    name = "thread_name",
+                    cat = "__metadata",
+                    ph = PhaseType.METADATA,
+                    ts = 0,
+                    pid = HAGENT_PID,
+                    tid = HAGENT_TID,
+                    args = {
+                        "name": "Pipe"
+                    },
+                ))
 
-        if not thread_metadata:
-            Tracer.log(TraceEvent(
-                name = "thread_name",
-                cat = "__metadata",
-                ph = PhaseType.METADATA,
-                ts = 0,
-                pid = HAGENT_PID,
-                tid = HAGENT_TID,
-                args = {
-                    "name": "Pipe"
-                },
-            ))
+            # Have one track for LLM Calls
             Tracer.log(TraceEvent(
                 name = "thread_name",
                 cat = "__metadata",
@@ -302,6 +314,50 @@ class Tracer:
         ))
     
     @classmethod
+    def get_last_dependency(cls, event: TraceEvent) -> TraceEvent:
+        """
+        Gets the last Step dependency of an event.
+
+        Args:
+            event: An event with the 'hagent.step' category.
+        
+        Returns:
+            A TraceEvent that is the dependency that ends the latest
+            out of all dependencies for the input event.
+
+        """
+        assert event.cat == "hagent.step"
+        steps = {}
+        outputs = {}
+        # Get the output of each Step.
+        for e in cls.events:
+            if e.cat == "hagent.step":
+                steps[e.args["step_id"]] = e
+                outputs[e.args["step_id"]] = e.args["data"]["tracing"]["output"]
+
+        latest_dependency_id = -1
+        max_time = 0
+        data = event.args["data"]
+        # DUPLICATE: This will automatically create an array of input files if one was not given.
+        if isinstance(data['tracing']['input'], str):
+            data['tracing']['input'] = [data['tracing']['input']]
+
+        print(event.name)
+        for dependency in data["tracing"]["input"]:
+            # The dependency is a result of a Step.
+            for step_id, output in outputs.items():
+                print(output, dependency)
+
+                print(max_time, steps[step_id].ts)
+                if output in dependency and max_time <= steps[step_id].ts:
+                    max_time = steps[step_id].ts
+                    latest_dependency_id = step_id
+                    print("YES")
+                print("------------")
+        
+        return steps[latest_dependency_id]
+
+    @classmethod
     def create_asynchronous_trace(cls, dependencies: Tuple[set, set, set]):
         """
         Creates an asynchronous trace from the recorded events.
@@ -313,19 +369,42 @@ class Tracer:
             - output files (output of a Step).
 
         """
+        initial, inputs, outputs = dependencies
         # Put every Step into a separate thread.
-        steps = []
+        steps = {}
         # Collect all Steps.
         for event in cls.events:
             if event.cat == "hagent.step":
-                steps.append(event)
+                steps[event.args["step_id"]] = event
 
+        new_timestamps = {}
         # Align timestamps to the same level in the dependency tree.
-        for event in cls.events:
-            event.tid = event["args"]["step_id"]
+        for step_id, event in steps.items():
+            data = event.args["data"]
+            event.tid = event.args["step_id"]
+            # DUPLICATE: This will automatically create an array of input files if one was not given.
+            if isinstance(data['tracing']['input'], str):
+                data['tracing']['input'] = [data['tracing']['input']]
+            inputs = data["tracing"]["input"]
 
-        raise NotImplementedError
-
+            # All of our inputs are initial YAML files (no dependencies).
+            print(f"SET: {event.name}: {inputs} - {initial} -> {set(inputs).issubset(initial)}")
+            if set(inputs).issubset(initial):
+                ts_to_subtract = event.ts
+                event.ts = 0
+            # Otherwise, our Step relies on another Step, and we 
+            # should place it after the last dependency.
+            else:
+                last_dependency = cls.get_last_dependency(event)
+                ts_to_subtract = event.ts
+                event.ts = last_dependency.ts + last_dependency.dur
+            
+            # Subtract the timestamp for all non-related sub-events.
+            for subevent in cls.events:
+                if subevent.cat != "hagent.step":
+                    interstep_offset = subevent.ts - ts_to_subtract
+                    step_offset = event.ts
+                    subevent.ts = step_offset + interstep_offset
     @classmethod
     def save_perfetto_trace(cls, dependencies: Tuple[set, set, set], filename: str=None, asynchronous: bool=False):
         """
@@ -341,7 +420,7 @@ class Tracer:
             filename = "hagent.json"
         # TODO: Modify the TraceEvents to be fully parallelized.
         if asynchronous:
-            cls.create_asynchronous_trace()
+            cls.create_asynchronous_trace(dependencies)
         # Add necessary metadata to visualize each event nicely.
         cls.add_metadata(asynchronous)
         # Add Flow TraceEvents to depict how each step flows into the next.
