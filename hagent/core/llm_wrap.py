@@ -75,6 +75,9 @@ class LLM_wrap:
             required_key = 'TOGETHER_AI_API_KEY'
         elif model.startswith('openrouter'):
             required_key = 'OPENROUTER_API_KEY'
+        elif model.startswith('ollama'):
+            # Ollama access is achieved through a URL such as 'http://localhost:11434'
+            required_key = 'OLLAMA_API_BASE'
         # Add more providers as needed...
         else:
             # No specific key required for this model type (or you can raise an error if unknown)
@@ -96,6 +99,7 @@ class LLM_wrap:
 
         self.last_error = ''
         self.chat_history = []  # Stores messages as [{"role": "...", "content": "..."}]
+        self.responses = [] # Stores the complete litellm response for tracing LLM calls.
         self.total_cost = 0.0
         self.total_tokens = 0
         self.total_time_ms = 0.0
@@ -235,7 +239,15 @@ class LLM_wrap:
 
         # Call litellm
         try:
+            start = time.time()
             r = litellm.completion(**llm_call_args)
+            end = time.time()
+            # Augment the litellm.ModelResponse with duration.
+            response = r.to_dict()
+            # Overwrite the response 'created' time to get matching sub-second accuracy.
+            response['created'] = start
+            response['elapsed'] = end - start
+            self.responses.append(response)
         except Exception as e:
             self._set_error(f'litellm call error: {e}')
             data = {'error': self.last_error}
