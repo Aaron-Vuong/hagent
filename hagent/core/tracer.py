@@ -1,8 +1,6 @@
-import datetime
 import functools
-import inspect
+import networkx as nx
 import json
-import litellm
 import threading
 import time
 
@@ -13,7 +11,6 @@ from typing import (
     Tuple,
 )
 
-from litellm.integrations.custom_logger import CustomLogger
 from ruamel.yaml import YAML
 
 # Keep everything under specific tabs in the Perfetto timeline.
@@ -88,7 +85,7 @@ class PhaseType(str, Enum):
     CONTEXT="(,)"
 
 class TraceEvent:
-    optional_args = ["args", "id", "bp", "dur"]
+    optional_args = ["args", "id", "bp", "dur", "scope"]
     def __init__(
             self,
             name: str,
@@ -110,6 +107,7 @@ class TraceEvent:
         self.tid = tid
         self.__dict__["args"] = {}
         for arg_name in kwargs:
+            # Only accept valid arguments in kwargs.
             if arg_name in self.optional_args:
                self.__dict__[arg_name] = kwargs[arg_name]
         
@@ -131,7 +129,7 @@ class TraceEvent:
     def __str__(self) -> str:
         s = Encoder().encode(self.to_json())
         return s
-    
+
     def __repr__(self) -> str:
         return self.__str__()
 
@@ -140,22 +138,16 @@ class Tracer:
     Singleton event handler for TraceEvents.
     """
     events = []
-    enabled = True
-
+    steps = []
+    id_steps = {}
     @classmethod
-    def disable(cls):
+    def clear(cls) -> List[TraceEvent]:
         """
-        Disables any tracing for this execution.
+        Clears all internal data structures.
         """
-        cls.enabled = False
         cls.events.clear()
-    
-    @classmethod
-    def enable(cls):
-        """
-        Enables any tracing for this execution.
-        """
-        cls.enabled = True
+        cls.steps.clear()
+        cls.id_steps.clear()
 
     @classmethod
     def get_events(cls) -> List[TraceEvent]:
@@ -169,8 +161,52 @@ class Tracer:
         """
         Add a new event.
         """
-        if cls.enabled:
-            cls.events.append(event)
+        cls.events.append(event)
+        if event.cat == "hagent.step":
+            cls.steps.append(event)
+            cls.id_steps[event.args["step_id"]] = event
+    
+    @classmethod
+    def get_tree_repr(cls, dependencies: Tuple[set, set, set]) -> nx.DiGraph:
+        """
+        Generates a NetworkX graph object to represent steps and dependencies.
+        
+        This uses a DiGraph, a directed graph with self loops and does not allow
+        parallel edges, which would be equivalent to the same input YAML being
+        present multiple times in input_files to the Step.
+
+        - Graph nodes are indexed by YAML.
+
+        Args:
+            dependencies: Three sets of YAML files
+            - initial YAML files (no dependencies)
+            - input YAML files (input(s) to a Step),
+            - output files (output of a Step).
+
+        Returns:
+            The graph object to manipulate.
+        
+        """
+        initial, _, _ = dependencies
+        g = nx.DiGraph()
+
+        for step in cls.steps:
+            g.add_node(
+                step.args["data"]["tracing"]["output"],
+                id=step.args["step_id"],
+                name=step.name)
+            # Map every non-initial input to the output.
+            for input in step.args["data"]["tracing"]["input"]:
+                if input in initial:
+                    continue
+                g.add_edge(input, step.args["data"]["tracing"]["output"])
+        
+        return g
+    
+    @classmethod
+    def get_step_from_yaml(cls, g: nx.DiGraph, yaml: str):
+        step_id = g.nodes[yaml]["id"]
+        return cls.id_steps[step_id]
 
     @classmethod
     def add_flow_events(cls, dependencies: Tuple[set, set, set]):
@@ -184,61 +220,39 @@ class Tracer:
             - output files (output of a Step).
 
         """
-        initial, inputs, outputs = dependencies
-        pipe_id = 0
-        # Each non-initial YAML file is a record of a Step execution.
-        for event in cls.events:
-            if event.cat != "hagent.step":
-                continue
-            data = event.args["data"]
-            if data.keys == ["error"]:
-                print("Failure detected in step!")
-                continue
+        g = cls.get_tree_repr(dependencies)
+        # Make an undirected copy of the digraph
+        ug = g.to_undirected()
 
-            # TODO: figure out support for multi-pipe flows.
-            flow_name = f"pipe_{pipe_id}"
-
-            # If the input of this Step was an initial configuration file,
-            # this step has no dependencies.
-
-            # This will automatically create an array of input files if one was not given.
-            if isinstance(data['tracing']['input'], str):
-                data['tracing']['input'] = [data['tracing']['input']]
-
-            print(f"INPUTS: {set(data['tracing']['input'])}: {set(data['tracing']['input']).intersection(initial)}")
-            if set(data['tracing']['input']).intersection(initial):
+        # Every fully disconnected subgraph is a separate Pipe.
+        sub_graphs = [g.subgraph(c) for c in nx.connected_components(ug)]
+        edge_id = 0
+        for pipe_id, sg in enumerate(sub_graphs):
+            for edge in sg.edges():
+                flow_name = f"pipe_{pipe_id}_flow_{edge_id}"
+                start, end = edge
+                start_step = cls.get_step_from_yaml(sg, start)
+                end_step = cls.get_step_from_yaml(sg, end)
                 Tracer.log(TraceEvent(
                     name = flow_name,
                     cat = "hagent",
                     ph = PhaseType.FLOW_START,
-                    ts = event.ts,
+                    ts = start_step.ts,
                     pid = HAGENT_PID,
-                    tid = event.tid,
-                    id = pipe_id)
+                    tid = start_step.tid,
+                    id = edge_id)
                 )
-            # If the output of this Step was an input of another Step,
-            # then we know this is an intermediate Step.
-            elif data['tracing']["output"] in inputs:
-                Tracer.log(TraceEvent(
-                    name = flow_name,
-                    cat = "hagent",
-                    ph = PhaseType.FLOW_STEP,
-                    ts = event.ts,
-                    pid = HAGENT_PID,
-                    tid = event.tid,
-                    id = pipe_id)
-                )
-            else:
                 Tracer.log(TraceEvent(
                     name = flow_name,
                     cat = "hagent",
                     ph = PhaseType.FLOW_END,
-                    ts = event.ts,
+                    ts = end_step.ts,
                     pid = HAGENT_PID,
-                    tid = event.tid,
-                    id = pipe_id,
+                    tid = end_step.tid,
+                    id = edge_id,
                     bp="e")
                 )
+                edge_id += 1
 
     @classmethod
     def add_metadata(cls, asynchronous: bool):
@@ -246,9 +260,7 @@ class Tracer:
         Adds metadata events to rename and prettify the Perfetto Trace.
         """
         # Add thread names.
-        for event in cls.events:
-            if event.cat != "hagent.step":
-                continue
+        for step in cls.steps:
             # Handle multi-thread.
             if asynchronous:
                 Tracer.log(TraceEvent(
@@ -256,10 +268,10 @@ class Tracer:
                     cat = "__metadata",
                     ph = PhaseType.METADATA,
                     ts = 0,
-                    pid = event.pid,
-                    tid = event.tid,
+                    pid = step.pid,
+                    tid = step.tid,
                     args = {
-                        "name": event.name
+                        "name": step.name
                     },
                 ))
             else:
@@ -275,21 +287,40 @@ class Tracer:
                         "name": "Pipe"
                     },
                 ))
+                break
+        
+        # Add thread names for LLM calls.
+        # Necessary to separate this from above for proper placement in Perfetto UI.
+        for step in cls.steps:
+            if asynchronous:
+                if len(step.args["data"]["tracing"]["history"]) > 0:
+                    Tracer.log(TraceEvent(
+                        name = "thread_name",
+                        cat = "__metadata",
+                        ph = PhaseType.METADATA,
+                        ts = 0,
+                        pid = LLM_PID,
+                        tid = step.tid,
+                        args = {
+                            "name": f"{step.name} (LLM_Completions)"
+                        },
+                    ))
+            else:
+                # Have one track for LLM Calls
+                Tracer.log(TraceEvent(
+                    name = "thread_name",
+                    cat = "__metadata",
+                    ph = PhaseType.METADATA,
+                    ts = 0,
+                    pid = LLM_PID,
+                    tid = LLM_TID,
+                    args = {
+                        "name": "LLM_Completions"
+                    },
+                ))
+                break
 
-            # Have one track for LLM Calls
-            Tracer.log(TraceEvent(
-                name = "thread_name",
-                cat = "__metadata",
-                ph = PhaseType.METADATA,
-                ts = 0,
-                pid = LLM_PID,
-                tid = LLM_TID,
-                args = {
-                    "name": "LLM_Completions"
-                },
-            ))
-
-        # Name overarching categories (Hagent + LLM).
+        # Name overarching categories for the PID (Hagent + LLM).
         Tracer.log(TraceEvent(
             name = "process_name",
             cat = "__metadata",
@@ -312,101 +343,79 @@ class Tracer:
                 "name": "LiteLLM"
             },
         ))
-    
-    @classmethod
-    def get_last_dependency(cls, event: TraceEvent) -> TraceEvent:
-        """
-        Gets the last Step dependency of an event.
-
-        Args:
-            event: An event with the 'hagent.step' category.
-        
-        Returns:
-            A TraceEvent that is the dependency that ends the latest
-            out of all dependencies for the input event.
-
-        """
-        assert event.cat == "hagent.step"
-        steps = {}
-        outputs = {}
-        # Get the output of each Step.
-        for e in cls.events:
-            if e.cat == "hagent.step":
-                steps[e.args["step_id"]] = e
-                outputs[e.args["step_id"]] = e.args["data"]["tracing"]["output"]
-
-        latest_dependency_id = -1
-        max_time = 0
-        data = event.args["data"]
-        # DUPLICATE: This will automatically create an array of input files if one was not given.
-        if isinstance(data['tracing']['input'], str):
-            data['tracing']['input'] = [data['tracing']['input']]
-
-        print(event.name)
-        for dependency in data["tracing"]["input"]:
-            # The dependency is a result of a Step.
-            for step_id, output in outputs.items():
-                print(output, dependency)
-
-                print(max_time, steps[step_id].ts)
-                if output in dependency and max_time <= steps[step_id].ts:
-                    max_time = steps[step_id].ts
-                    latest_dependency_id = step_id
-                    print("YES")
-                print("------------")
-        
-        return steps[latest_dependency_id]
 
     @classmethod
-    def create_asynchronous_trace(cls, dependencies: Tuple[set, set, set]):
+    def create_asynchronous_trace(cls, dependencies: Tuple[set, set, set], step_offset: int):
         """
         Creates an asynchronous trace from the recorded events.
+
+        This performs the following algorithm to re-order all events.
+        1. Set every Step with no dependence on another Step to timestamp (ts) 0.
+            1a. Also set every Step to a new TID to display it on a separate
+                track.
+        2. Use BFS to move through the dependency tree layer by layer.
+            2a. For each layer, set each Step's ts to the latest (ts + dur)
+                of its parents.
+            2b. For each moved Step, move each non-Step event with the same
+                Step ID to match its new ts.
 
         Args:
             dependencies: Three sets of YAML files
             - initial YAML files (no dependencies)
             - input YAML files (input(s) to a Step),
             - output files (output of a Step).
+            step_offset: How far apart to place each layer of Steps from each other in ms.
+                         0 indicates that all Steps should be touching if displayed on a single track.
 
         """
-        initial, inputs, outputs = dependencies
-        # Put every Step into a separate thread.
-        steps = {}
-        # Collect all Steps.
-        for event in cls.events:
-            if event.cat == "hagent.step":
-                steps[event.args["step_id"]] = event
+        g = cls.get_tree_repr(dependencies)
+        
+        visited = set()
+        for potential_root in g.nodes:
+            # Look for nodes that have no dependencies.
+            if len(list(g.predecessors(potential_root))) != 0:
+                continue
+            # If this root is not in a completely disconnected tree,
+            # then skip it, we've already done the work for this.
+            if potential_root in visited:
+                continue
 
-        new_timestamps = {}
-        # Align timestamps to the same level in the dependency tree.
-        for step_id, event in steps.items():
-            data = event.args["data"]
-            event.tid = event.args["step_id"]
-            # DUPLICATE: This will automatically create an array of input files if one was not given.
-            if isinstance(data['tracing']['input'], str):
-                data['tracing']['input'] = [data['tracing']['input']]
-            inputs = data["tracing"]["input"]
+            # Iterate through Steps via BFS, layer by layer.
+            tree_iter = nx.bfs_tree(g, potential_root)
+            for layer_idx, layer in enumerate(tree_iter):
+                # Ensure the layer is an iterable when 1 element.
+                if isinstance(layer, str): layer = [layer]
+                for yaml_file in layer:
+                    step_id = g.nodes[yaml_file]["id"]
+                    step = cls.get_step_from_yaml(g, yaml_file)
+                    step.tid = step_id
+                    orig_event_ts = step.ts
+                    visited.add(yaml_file)
+                    # If it is the first layer, we know that steps should be placed at timestamp 0.
+                    if layer_idx == 0:
+                        step.ts = 0
+                    else:
+                        # Otherwise, get the last dependency and set that as the last timestamp.
+                        dependency_timestamps = []
+                        # TODO: If there are multiple dependencies, we need to run again.
+                        if len(g.pred[yaml_file]) > 1:
+                            pass
+                        for dependency in g.pred[yaml_file]:
+                            step_dependency = cls.get_step_from_yaml(g, dependency)
+                            dependency_timestamps.append(step_dependency.ts + step_dependency.dur + step_offset)
+                        step.ts = max(dependency_timestamps)
+                
+                    # Move all related sub-events for this step.
+                    for subevent in cls.events:
+                        if subevent.cat != "hagent.step" and subevent.args["step_id"] == step_id:
+                            interstep_offset = subevent.ts - orig_event_ts
+                            step_offset = step.ts
+                            subevent.ts = step_offset + interstep_offset
+                            subevent.tid = step_id
 
-            # All of our inputs are initial YAML files (no dependencies).
-            print(f"SET: {event.name}: {inputs} - {initial} -> {set(inputs).issubset(initial)}")
-            if set(inputs).issubset(initial):
-                ts_to_subtract = event.ts
-                event.ts = 0
-            # Otherwise, our Step relies on another Step, and we 
-            # should place it after the last dependency.
-            else:
-                last_dependency = cls.get_last_dependency(event)
-                ts_to_subtract = event.ts
-                event.ts = last_dependency.ts + last_dependency.dur
-            
-            # Subtract the timestamp for all non-related sub-events.
-            for subevent in cls.events:
-                if subevent.cat != "hagent.step":
-                    interstep_offset = subevent.ts - ts_to_subtract
-                    step_offset = event.ts
-                    subevent.ts = step_offset + interstep_offset
     @classmethod
-    def save_perfetto_trace(cls, dependencies: Tuple[set, set, set], filename: str=None, asynchronous: bool=False):
+    def save_perfetto_trace(cls, dependencies: Tuple[set, set, set],
+                            filename: str=None, asynchronous: bool=False, step_offset: int=0):
         """
         Saves the events off in a Perfetto-compatible JSON file.
 
@@ -418,9 +427,9 @@ class Tracer:
         """
         if filename is None:
             filename = "hagent.json"
-        # TODO: Modify the TraceEvents to be fully parallelized.
+        # Modify the TraceEvents to be fully parallelized.
         if asynchronous:
-            cls.create_asynchronous_trace(dependencies)
+            cls.create_asynchronous_trace(dependencies, step_offset)
         # Add necessary metadata to visualize each event nicely.
         cls.add_metadata(asynchronous)
         # Add Flow TraceEvents to depict how each step flows into the next.
@@ -443,7 +452,7 @@ def trace_function(func):
         start_time = time.time()
         result = func(*args, **kwargs)
         end_time = time.time()
-        # Mark each function as a complete step.
+        # Mark each function as a complete event.
         # We can augment the log with Flow comments later on.
         
         # Ensure all arguments (*args, **kwargs) are JSON serializable.
@@ -528,148 +537,3 @@ class TracerABCMetaClass(ABCMeta, TracerMetaClass):
     """
     Use this MetaClass when using @abstractmethod/for abstract classes.
     """
-
-#############
-## LITELLM ##
-#############
-class TracerHandler(CustomLogger):
-    """
-    Custom callback for litellm support.
-    """
-    def log_pre_api_call(self, model, messages, kwargs):
-        return
-        print(f" <--- Pre-API Call")
-        # print(f"MODEL: {model}")
-        # print(f"MESSAGES: {messages}")
-        # print(f"KWARGS: {kwargs}")
-        print(f"PRE API START: {time.time()}")
-        
-        Tracer.log(TraceEvent(
-            name = kwargs["litellm_call_id"] + "_PRE",
-            cat = "hagent",
-            ph = PhaseType.COMPLETE,
-            ts = s_to_us(time.time()),
-            pid = 10,
-            # TODO: Investigate using something else?
-            tid = 5333,
-            args = {
-                "kwargs": kwargs,
-                "messages": messages,
-            },
-            dur = s_to_us(0),
-        ))
-        print(f" ---> Pre-API Call")
-    
-    def log_post_api_call(self, kwargs, response_obj, start_time, end_time):
-        return
-        print(f" <--- Post-API Call")
-        print(f"KWARGS: {kwargs}")
-        print(f"RESPONSE_OBJ: {response_obj}")
-        print(f"START: {start_time}")
-        print(f"END: {end_time}")
-        print(f" ---> Post-API Call")
-    
-
-    def log_success_event(self, kwargs, response_obj, start_time, end_time):
-        return
-        print(f" <--- On Success")
-        #print(f"KWARGS: {kwargs}")
-        duration = (end_time - start_time).total_seconds()
-        #print(f"duration: {duration}")
-        print(f"SUCCESS START: {time.time()}")
-        print("logging")
-        Tracer.log(TraceEvent(
-            name = kwargs["litellm_call_id"] + "_SUCCESS",
-            cat = "hagent",
-            ph = PhaseType.COMPLETE,
-            ts = s_to_us(start_time.timestamp()),
-            pid = 10,
-            # TODO: Investigate using something else?
-            tid = 5333,
-            args = {
-                "kwargs": kwargs,
-                "response_obj": response_obj
-            },
-            dur = s_to_us(duration),
-        ))
-        print(f" ---> On Success")
-        Tracer.save_perfetto_trace()
-
-    def log_failure_event(self, kwargs, response_obj, start_time, end_time):
-        return
-        print(f" <--- On Failure")
-        print(f"KWARGS: {kwargs}")
-        print(f"RESPONSE_OBJ: {response_obj}")
-        print(f"START: {start_time}")
-        print(f"END: {end_time}")
-        print(f" ---> On Failure")
-    
-    #### ASYNC #### - for acompletion/aembeddings
-
-    async def async_log_success_event(self, kwargs, response_obj, start_time, end_time):
-        return
-        print(f" <--- On Async Success")
-        print(f"KWARGS: {kwargs}")
-        print(f"RESPONSE_OBJ: {response_obj}")
-        print(f"START: {start_time}")
-        print(f"END: {end_time}")
-        print(f" ---> On Async Success")
-
-    async def async_log_failure_event(self, kwargs, response_obj, start_time, end_time):
-        return
-        print(f" <--- On Async Failure")
-        print(f"KWARGS: {kwargs}")
-        print(f"RESPONSE_OBJ: {response_obj}")
-        print(f"START: {start_time}")
-        print(f"END: {end_time}")
-        print(f" ---> On Async Failure")
-
-# Add tracing to liteLLM.
-#tracer_handler = TracerHandler()
-#litellm.callbacks.append(tracer_handler)
-
-#############
-## TESTING ##
-#############
-def test(func):
-    @functools.wraps(func)
-    def wrapper(*args, **kwargs):
-        print("start_test")
-        result = func(*args, **kwargs)
-        print(result)
-        print("test")
-        return result
-    return wrapper
-
-class Base(metaclass=TracerMetaClass):
-    def baz(self):
-        print("base")
-
-class SubClass(Base):
-    def new_function(self):
-        print("_subclass")
-
-class SubSubClass(SubClass):
-    @test
-    def f(self, b: int):
-        print("__subclass")
-        return b
-
-def trace_inner(func):
-    @functools.wraps(func)
-    def inner(*args, **kwargs):
-        print(inspect.getmembers(inner))
-        #inner_functions = [member[1] for member in inspect.getmembers(func, inspect.isfunction) if member[1].__qualname__.startswith(func.__name__+'.')]
-        #print(inner_functions)
-        result = func(*args, **kwargs)
-        return result
-    return inner
-
-@trace_inner
-def main():
-    q = SubSubClass()
-    q.f(b=5)
-    print(Tracer.events)
-
-if __name__ == "__main__":
-    main()

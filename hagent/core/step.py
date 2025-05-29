@@ -168,7 +168,11 @@ class Step(metaclass=TracerMetaClass):
         output_data['tracing'] = {}
         output_data['tracing']['start'] = s_to_us(start)
         output_data['tracing']['elapsed'] = s_to_us(elapsed)
-        output_data['tracing']['input'] = self.input_file
+        # Ensure that "input" is a list for future multi-input support
+        input = self.input_file
+        if isinstance(self.input_file, str):
+            input = [self.input_file]
+        output_data['tracing']['input'] = input
         output_data['tracing']['output'] = self.output_file
         output_data['tracing']['trace_events'] = Tracer.get_events()
         output_data['tracing']['history'] = history

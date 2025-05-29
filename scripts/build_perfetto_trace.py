@@ -7,19 +7,15 @@ import logging
 import os
 
 from typing import (
-    Any,
-    Dict,
     List,
     Tuple,
 )
 
-from hagent.core.step import Step
 from hagent.core.tracer import (
     HAGENT_PID,
     LLM_PID,
     HAGENT_TID,
     LLM_TID,
-    METADATA_TID,
     PhaseType,
     Tracer,
     TraceEvent,
@@ -51,13 +47,19 @@ def parse_arguments() -> argparse.ArgumentParser:
         default='perfetto.json',
         help='Name of the output Perfetto Trace.'
     )
+    parser.add_argument(
+        '--step-offset',
+        type=int,
+        default=0,
+        help='How far apart Steps should be placed in an asynchronous trace.'
+    )
     return parser
 
-def scan_for_files(run_dir: str) -> List[str]:
+def scan_for_yamls(run_dir: str) -> List[str]:
+    """
+    Scans the specified directory for YAML files.
+    """
     return glob.glob(f"{run_dir}/*.yaml")
-
-def get_data_from_yaml(yaml_f: str) -> Dict[Any, Any]:
-    return
 
 def parse_yaml_files(yaml_files: List[str]) -> Tuple[set, set, set]:
     """
@@ -88,7 +90,8 @@ def parse_yaml_files(yaml_files: List[str]) -> Tuple[set, set, set]:
             continue
 
         # Track the inputs/output YAMLs.
-        inputs.add(data['tracing']["input"])
+        for input in data['tracing']["input"]:
+            inputs.add(input)
         outputs.add(data['tracing']["output"])
         # Log the Step itself.
 
@@ -117,6 +120,7 @@ def parse_yaml_files(yaml_files: List[str]) -> Tuple[set, set, set]:
         if data['tracing'].get("trace_events", None):
             for trace_event in data['tracing']["trace_events"]:
                 trace_event["args"]["step_id"] = step_id
+                trace_event["tid"] = HAGENT_TID
                 Tracer.log(TraceEvent(**trace_event))
 
 
@@ -156,7 +160,7 @@ def parse_yaml_files(yaml_files: List[str]) -> Tuple[set, set, set]:
         step_id += 1
     return (initial, inputs, outputs)
 
-def generate_perfetto_trace(yaml_files: List[str], output_file: str, asynchronous: bool):
+def generate_perfetto_trace(yaml_files: List[str], output_file: str, asynchronous: bool, step_offset: int):
     """
     Generates a Perfetto Trace given all relevant YAML files.
 
@@ -164,9 +168,9 @@ def generate_perfetto_trace(yaml_files: List[str], output_file: str, asynchronou
         yaml_files: The list of relevant YAML files to include in the trace.
         output_file: The output file to dump the Perfetto Trace to.
         asynchronous: Disregard the actual execution and display an asynchronous ordering.
+        step_offset: How far apart Steps should be spaced in the Perfetto timeline.
 
     """
-
     # Initial YAMLs used as inputs for a Pipe.
     initial, inputs, outputs = parse_yaml_files(yaml_files)
 
@@ -177,7 +181,8 @@ def generate_perfetto_trace(yaml_files: List[str], output_file: str, asynchronou
     Tracer.save_perfetto_trace(
         dependencies=(initial, inputs, outputs),
         filename=output_file,
-        asynchronous=asynchronous)
+        asynchronous=asynchronous,
+        step_offset=step_offset)
 
 def main():
     parser = parse_arguments()
@@ -185,9 +190,9 @@ def main():
 
     logging.basicConfig(filename="perfetto_trace.log", level=logging.INFO)
 
-    yaml_files = scan_for_files(args.input_dir)
+    yaml_files = scan_for_yamls(args.input_dir)
     logger.info("Gathered YAML files: %s" % yaml_files)
-    generate_perfetto_trace(yaml_files, args.output_file, args.asynchronous)
+    generate_perfetto_trace(yaml_files, args.output_file, args.asynchronous, args.step_offset)
     logger.info("Finished generated Perfetto trace: [%s]", args.output_file)
 
 if __name__ == "__main__":
