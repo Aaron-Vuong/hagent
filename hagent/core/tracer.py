@@ -1,6 +1,8 @@
 import functools
-import networkx as nx
+import glob
 import json
+import networkx as nx
+import os
 import threading
 import time
 
@@ -19,6 +21,7 @@ HAGENT_TID = 0
 LLM_PID = 1
 LLM_TID = 1
 METADATA_TID = 2
+COST_PID = 2
 
 def s_to_us(s: float) -> float:
     """
@@ -132,6 +135,112 @@ class TraceEvent:
 
     def __repr__(self) -> str:
         return self.__str__()
+
+def scan_for_yamls(run_dir: str) -> List[str]:
+    """
+    Scans the specified directory for YAML files.
+    """
+    return glob.glob(f"{run_dir}/*.yaml")
+
+def parse_yaml_files(yaml_files: List[str]) -> Tuple[set, set, set]:
+    """
+    Parses the YAML files for the initial hierarchy of Steps + Tool Calls.
+
+    Args:
+        yaml_files: The list of relevant YAML files to include in the trace.
+    
+    Returns:
+        The dependencies files listed in each YAML under data['tracing']['input']
+        or data['tracing']['output'].
+
+    """
+    initial = set()
+    inputs = set()
+    outputs = set()
+    step_id = 0
+    for idx, f in enumerate(yaml_files):
+        data = read_yaml(f)
+        if data.keys == ["error"]:
+            print("Failure detected in step!")
+
+        # If there is no 'tracing' key, it may be one of two cases.
+        # - Initial input YAML
+        # - Non-relevant YAML
+        if data.get('tracing', None) is None:
+            initial.add(os.path.basename(f))
+            continue
+
+        # Track the inputs/output YAMLs.
+        for input in data['tracing']["input"]:
+            inputs.add(input)
+        outputs.add(data['tracing']["output"])
+        # Log the Step itself.
+
+        # Start from the __init__
+        ts = data['tracing']['trace_events'][0]["ts"]
+        additional_dur = data['tracing']['start'] - ts
+
+        # Log any LLM calls made by LLM_wrap during the Step.
+        if data['tracing'].get("history", None):
+            for llm_call in data['tracing']["history"]:
+                Tracer.log(TraceEvent(
+                    name = llm_call["id"],
+                    cat = "llm",
+                    ph = PhaseType.COMPLETE,
+                    ts = s_to_us(llm_call["created"]),
+                    pid = LLM_PID,
+                    tid = LLM_TID,
+                    args = {
+                        "step_id": step_id,
+                        "data": llm_call
+                    },
+                    dur = s_to_us(llm_call["elapsed"]),
+                ))
+
+        # Log any TraceEvents recorded during the Step.
+        if data['tracing'].get("trace_events", None):
+            for trace_event in data['tracing']["trace_events"]:
+                trace_event["args"]["step_id"] = step_id
+                trace_event["tid"] = HAGENT_TID
+                Tracer.log(TraceEvent(**trace_event))
+
+
+        # Log the actual step() call.
+        Tracer.log(TraceEvent(
+            name = f"{data['step']}::step",
+            cat = "hagent",
+            ph = PhaseType.COMPLETE,
+            ts = data['tracing']["start"],
+            pid = HAGENT_PID,
+            tid = HAGENT_TID,
+            args = {
+                "step_id": step_id,
+            },
+            dur = data['tracing']["elapsed"],
+        ))
+
+        # Then log the overarching Step execution.
+        ## We add a slight offset (0.3 us) so that Flow events
+        ## can pick up the overall Step instead of the __init__
+        ## function.
+        marker_offset = 0.3
+        Tracer.log(TraceEvent(
+            name = data["step"],
+            cat = "hagent.step",
+            ph = PhaseType.COMPLETE,
+            ts = ts - marker_offset,
+            pid = HAGENT_PID,
+            tid = HAGENT_TID,
+            args = {
+                "step_id": step_id,
+                "data": data
+            },
+            dur = data['tracing']["elapsed"] + additional_dur + marker_offset,
+        ))
+
+        step_id += 1
+    return (initial, inputs, outputs)
+
 
 class Tracer:
     """
@@ -375,10 +484,6 @@ class Tracer:
             # Look for nodes that have no dependencies.
             if len(list(g.predecessors(potential_root))) != 0:
                 continue
-            # If this root is not in a completely disconnected tree,
-            # then skip it, we've already done the work for this.
-            if potential_root in visited:
-                continue
 
             # Iterate through Steps via BFS, layer by layer.
             tree_iter = nx.bfs_tree(g, potential_root)
@@ -397,12 +502,18 @@ class Tracer:
                     else:
                         # Otherwise, get the last dependency and set that as the last timestamp.
                         dependency_timestamps = []
-                        # TODO: If there are multiple dependencies, we need to run again.
-                        if len(g.pred[yaml_file]) > 1:
-                            pass
+                        dependency_unvisited = False
                         for dependency in g.pred[yaml_file]:
+                            if dependency not in visited:
+                                dependency_unvisited = True
+                                break
                             step_dependency = cls.get_step_from_yaml(g, dependency)
                             dependency_timestamps.append(step_dependency.ts + step_dependency.dur + step_offset)
+                        # If we have an unvisited dependency, that needs to be resolved before we can
+                        # apply any timestamp change here. This Step will be revisited since the unvisited dependency
+                        # will be visited in the future.
+                        if dependency_unvisited is True:
+                            continue
                         step.ts = max(dependency_timestamps)
                 
                     # Move all related sub-events for this step.

@@ -1,8 +1,16 @@
 import functools
+import json
+import os
 import pytest
 
 import hagent.core.tracer as tracer
 
+@pytest.fixture
+def test_dir():
+    """
+    Returns the base YAML test directory.
+    """
+    return os.path.join(os.path.dirname(os.path.realpath(__file__)), "test_data")
 
 @pytest.fixture
 def base_trace_event():
@@ -39,6 +47,7 @@ def sample_step_sequence():
     """
     Returns a sample 2-Step sequence with a sub-event.
     """
+    data = {}
     return [
         tracer.TraceEvent(
             name = "step_1",
@@ -210,4 +219,38 @@ class TestTracer:
         assert len(tracer.Tracer.get_events()) == 1
 
 class TestGeneratePerfetto:
-    pass
+    def test_generate_simple(self, test_dir, clean_tracer):
+        simple_dir = os.path.join(test_dir, "simple")
+        yaml_files = tracer.scan_for_yamls(simple_dir)
+        initial, inputs, outputs = tracer.parse_yaml_files(yaml_files)
+        
+        tracer.Tracer.save_perfetto_trace(
+            dependencies=(initial, inputs, outputs),
+            filename="simple_perfetto.json")
+        
+        generated_trace = os.path.join(os.getcwd(), "simple_perfetto.json")
+
+        assert os.path.exists(generated_trace) is True
+        with open(generated_trace, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        
+        assert isinstance(data["traceEvents"], list) is True
+        
+    def test_generate_multi_input(self, test_dir, clean_tracer):
+        multi_input_dir = os.path.join(test_dir, "multi_input")
+        yaml_files = tracer.scan_for_yamls(multi_input_dir)
+        initial, inputs, outputs = tracer.parse_yaml_files(yaml_files)
+
+        tracer.Tracer.save_perfetto_trace(
+            dependencies=(initial, inputs, outputs),
+            filename="multi_perfetto.json",
+            asynchronous=True,
+            step_offset=300)
+        
+        generated_trace = os.path.join(os.getcwd(), "multi_perfetto.json")
+
+        assert os.path.exists(generated_trace) is True
+        with open(generated_trace, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        
+        assert isinstance(data["traceEvents"], list) is True

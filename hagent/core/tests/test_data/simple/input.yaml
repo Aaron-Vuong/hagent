@@ -1,0 +1,13 @@
+code_content: |
+  module and_gate_behavioral(output reg Y, input A, input B);
+      always @(A or B) begin
+          Y = A & B;
+      end
+  endmodule
+
+top_name: "and_gate_behavioral"
+
+llm:
+  model: "ollama/gemma3:4b" # Cheap fireworks model
+  drop_params: true
+
