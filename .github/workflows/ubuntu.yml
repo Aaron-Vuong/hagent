@@ -52,5 +52,23 @@ jobs:
     needs: install
 
     steps:
+      # Re-use the Poetry installation.
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Load cached Poetry installation
+        id: cached-poetry
+        uses: actions/cache@v4
+        with:
+          path: ~/.local  # the cached Poetry installation path depends on the OS
+          key: poetry-0  # increment to reset cache
+      - name: Install Poetry
+        if: steps.cached-poetry.outputs.cache-hit != 'true'
+        uses: snok/install-poetry@v1
+
+      # Run the actual job.
       - name: Run ruff
         run: poetry run ruff . 
