@@ -70,7 +70,7 @@ class Equiv_check:
             self.error_message = f'Yosys not found or not accessible: {e}'
             return False
 
-    def check_equivalence(self, gold_code: str, gate_code: str, desired_top: str = "SingleCycleCPU") -> Optional[bool]:
+    def check_equivalence(self, gold_code: str, gate_code: str, desired_top: str = 'SingleCycleCPU') -> Optional[bool]:
         """
         Checks the equivalence of two Verilog designs:
           - gold_code: The 'gold' version to match
@@ -88,14 +88,14 @@ class Equiv_check:
             raise RuntimeError('Yosys not installed or setup() not called.')
 
         # 1) Validate each snippet has exactly one module
-        #desired_top = self._extract_single_module_name(gate_code)
-         
+        # desired_top = self._extract_single_module_name(gate_code)
+
         gold_top = self._extract_module_name(gold_code, top_module=desired_top)
         gate_top = self._extract_module_name(gate_code, top_module=desired_top)
         if gold_top == gate_top:
-            print(f"gold_top provided = gate_top provided = {gate_top}")
+            print(f'gold_top provided = gate_top provided = {gate_top}')
         else:
-            raise ValueError(f"Error: gold_top ({gold_top}) and gate_top ({gate_top}) do not match!")
+            raise ValueError(f'Error: gold_top ({gold_top}) and gate_top ({gate_top}) do not match!')
 
         # 2) Write each design to a temp file
         #
@@ -256,7 +256,7 @@ class Equiv_check:
 
     def _analyze_yosys_result(self, code: int, out: str, err: str, method: str) -> Optional[bool]:
         if 'ERROR' in err:
-            print("WARNING: YOSYS failed to check with this message (likely a Verilog Syntax Error)", file=sys.stderr)
+            print('WARNING: YOSYS failed to check with this message (likely a Verilog Syntax Error)', file=sys.stderr)
             print(err, file=sys.stderr)
             return False
 

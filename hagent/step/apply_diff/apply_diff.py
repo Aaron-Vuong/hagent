@@ -1,6 +1,7 @@
 from hagent.core.step import Step
 from hagent.tool.chisel_diff_applier import ChiselDiffApplier
 
+
 class Apply_diff(Step):
     """
     Applies a unified diff to Chisel source code and verifies by checking removal/addition lines.
@@ -12,15 +13,16 @@ class Apply_diff(Step):
       - chisel_candidate: str
       - apply_diff_ok:    bool
     """
+
     def setup(self):
         super().setup()
         self.applier = ChiselDiffApplier()
         self.setup_called = True
 
     def run(self, data):
-        original  = data.get('chisel_original', '')
+        original = data.get('chisel_original', '')
         diff_text = data.get('generated_diff', '')
-        print("\n********diff_text:", diff_text)
+        print('\n********diff_text:', diff_text)
 
         # Apply the diff
         candidate = self.applier.apply_diff(diff_text, original)
@@ -35,9 +37,9 @@ class Apply_diff(Step):
                 removals.append(line[1:].strip())
             elif line.startswith('+'):
                 additions.append(line[1:].strip())
-        
+
         # DEBUG: print both diffs for inspection
-        print("=== apply_diff: input diff ===")
+        print('=== apply_diff: input diff ===')
         print(diff_text)
 
         # Verify each removal existed in original, and each addition appears in candidate

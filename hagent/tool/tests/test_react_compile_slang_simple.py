@@ -86,16 +86,16 @@ def test_react_with_corrupt_db():
         tmp_name = tmp.name
         # Write corrupt YAML
         tmp.write(b"error_type1: 'not a dict'\n")
-    
+
     try:
         # Initialize React with the corrupt DB file
         react = React()
         setup_success = react.setup(db_path=tmp_name, learn=False)
         # The current implementation doesn't validate the structure of the DB
         # It just loads whatever is in the file, so this should return True
-        assert setup_success, "Setup should succeed with corrupt DB structure"
-        
-        print("Test with corrupt DB passed!")
+        assert setup_success, 'Setup should succeed with corrupt DB structure'
+
+        print('Test with corrupt DB passed!')
     finally:
         # Clean up
         if os.path.exists(tmp_name):
@@ -105,25 +105,25 @@ def test_react_with_corrupt_db():
 def test_react_with_nonexistent_db_file():
     """Test React with a non-existent database file."""
     # Use a non-existent file path that definitely doesn't exist
-    non_existent_path = f"non_existent_db_file_{uuid.uuid4()}.yaml"
-    
+    non_existent_path = f'non_existent_db_file_{uuid.uuid4()}.yaml'
+
     # Initialize React with the non-existent DB file
     react = React()
-    
+
     # Test with learn mode disabled
     setup_success = react.setup(db_path=non_existent_path, learn=False)
-    assert not setup_success, "Setup should fail with non-existent DB and learn=False"
-    assert "Database file not found" in react.error_message
-    
+    assert not setup_success, 'Setup should fail with non-existent DB and learn=False'
+    assert 'Database file not found' in react.error_message
+
     # Test with learn mode enabled
     setup_success = react.setup(db_path=non_existent_path, learn=True)
-    assert setup_success, "Setup should succeed with non-existent DB and learn=True"
-    
+    assert setup_success, 'Setup should succeed with non-existent DB and learn=True'
+
     # Clean up any created file
     if os.path.exists(non_existent_path):
         os.remove(non_existent_path)
-    
-    print("Test with non-existent DB file passed!")
+
+    print('Test with non-existent DB file passed!')
 
 
 def test_react_save_db():
@@ -131,27 +131,27 @@ def test_react_save_db():
     # Create a temporary DB file
     with tempfile.NamedTemporaryFile(delete=False, suffix='.yaml') as tmp:
         tmp_name = tmp.name
-    
+
     try:
         # Initialize React with the DB file and learn mode enabled
         react = React()
         setup_success = react.setup(db_path=tmp_name, learn=True)
-        assert setup_success, f"React setup failed: {react.error_message}"
-        
+        assert setup_success, f'React setup failed: {react.error_message}'
+
         # Add an error example
-        react._add_error_example("test_error", "test_question", "test_answer")
-        
+        react._add_error_example('test_error', 'test_question', 'test_answer')
+
         # Re-initialize React to load from the saved DB
         react2 = React()
         setup_success = react2.setup(db_path=tmp_name, learn=False)
-        assert setup_success, f"React setup failed: {react2.error_message}"
-        
+        assert setup_success, f'React setup failed: {react2.error_message}'
+
         # Check if the error example was saved
-        assert "test_error" in react2._db, "Error example not saved to DB"
-        assert react2._db["test_error"]["fix_question"] == "test_question", "Fix question not saved correctly"
-        assert react2._db["test_error"]["fix_answer"] == "test_answer", "Fix answer not saved correctly"
-        
-        print("Test save DB passed!")
+        assert 'test_error' in react2._db, 'Error example not saved to DB'
+        assert react2._db['test_error']['fix_question'] == 'test_question', 'Fix question not saved correctly'
+        assert react2._db['test_error']['fix_answer'] == 'test_answer', 'Fix answer not saved correctly'
+
+        print('Test save DB passed!')
     finally:
         # Clean up
         if os.path.exists(tmp_name):
@@ -163,7 +163,7 @@ def main():
     test_react_with_corrupt_db()
     test_react_with_nonexistent_db_file()
     test_react_save_db()
-    
+
     parser = argparse.ArgumentParser(description='Iteratively fix Verilog code using React, Compile_slang, and LLM_wrap.')
     parser.add_argument('verilog_file', help='Path to the Verilog source file')
     args = parser.parse_args()

@@ -20,14 +20,14 @@ class File_manager:
     overlay_directory: str
     error_message: str
 
-    def __init__(self, cwd: Optional[str] = ".") -> None:
+    def __init__(self, cwd: Optional[str] = '.') -> None:
         """
         Create a new overlay with overlay root (temp directory).
         Initializes internal state; does not scan or apply anything yet.
         """
         self.cwd = cwd
-        self.overlay_directory = tempfile.mkdtemp(prefix="file_manager_")
-        self.error_message = ""
+        self.overlay_directory = tempfile.mkdtemp(prefix='file_manager_')
+        self.error_message = ''
         self.tracked_files: List[str] = []
         self._original_contents: Dict[str, List[str]] = {}
         self._yaml = YAML()
@@ -40,13 +40,7 @@ class File_manager:
         """
         return True
 
-    def add_dir(
-        self,
-        dir: str,
-        *,
-        recursive: bool = False,
-        ext: Optional[str] = None
-    ) -> None:
+    def add_dir(self, dir: str, *, recursive: bool = False, ext: Optional[str] = None) -> None:
         """
         Add all files in `dir` (filtered by extension glob `ext`) into the overlay.
         Does not raise; errors recorded in `error_message`.
@@ -82,7 +76,7 @@ class File_manager:
         """
         dest = os.path.join(self.overlay_directory, filename)
         os.makedirs(os.path.dirname(dest), exist_ok=True)
-        with open(dest, "w", encoding="utf-8") as f:
+        with open(dest, 'w', encoding='utf-8') as f:
             f.write(content)
         lines = content.splitlines(keepends=True)
         self._original_contents[filename] = lines
@@ -100,15 +94,15 @@ class File_manager:
                 data = self._yaml.load(f)
             entry = data.get(name)
             if not entry:
-                self.error_message = f"No entry named {name}"
+                self.error_message = f'No entry named {name}'
                 return False
-            for pat in entry.get("patches", []):
-                fn = pat["filename"]
-                diff = pat.get("diff", "")
+            for pat in entry.get('patches', []):
+                fn = pat['filename']
+                diff = pat.get('diff', '')
                 patched = list(difflib.restore(diff.splitlines(keepends=True), 2))
                 dest = os.path.join(self.overlay_directory, fn)
                 os.makedirs(os.path.dirname(dest), exist_ok=True)
-                with open(dest, "w", encoding="utf-8") as outf:
+                with open(dest, 'w', encoding='utf-8') as outf:
                     outf.writelines(patched)
                 self._original_contents.setdefault(fn, [])
                 if fn not in self.tracked_files:
@@ -142,13 +136,13 @@ class File_manager:
             code = proc.returncode
         except Exception as e:
             self.error_message = str(e)
-            return -1, "", str(e)
+            return -1, '', str(e)
         for root, _, files in os.walk(self.overlay_directory):
             for fn in files:
                 rel = os.path.relpath(os.path.join(root, fn), self.overlay_directory)
                 if rel not in self.tracked_files:
                     self.tracked_files.append(rel)
-        return code, out.decode("utf-8", errors="ignore"), err.decode("utf-8", errors="ignore")
+        return code, out.decode('utf-8', errors='ignore'), err.decode('utf-8', errors='ignore')
 
     def get_patch_dict(self) -> Dict[str, Any]:
         """
@@ -156,16 +150,15 @@ class File_manager:
         """
         patches = []
         for fn in self.tracked_files:
-            patches.append({"filename": fn, "diff": self.get_diff(fn)})
-        return {"overlay_directory": self.overlay_directory,
-                "files": list(self.tracked_files),
-                "patches": patches}
+            patches.append({'filename': fn, 'diff': self.get_diff(fn)})
+        return {'overlay_directory': self.overlay_directory, 'files': list(self.tracked_files), 'patches': patches}
 
     def save_patches(self, yaml_file: str, name: str) -> bool:
         """
         Dump current patch-dict to YAML at `yaml_file` under top-level key `name`.
         Writes in the real cwd, not in the overlay.
         """
+
         def process_multiline_strings(obj):
             """
             Recursively convert strings with newlines into LiteralScalarString so that they
@@ -181,8 +174,7 @@ class File_manager:
             return obj
 
         try:
-            real_path = (yaml_file if os.path.isabs(yaml_file)
-                         else os.path.join(os.getcwd(), yaml_file))
+            real_path = yaml_file if os.path.isabs(yaml_file) else os.path.join(os.getcwd(), yaml_file)
             data = {}
             if os.path.exists(real_path):
                 data = self._yaml.load(open(real_path)) or {}
@@ -190,7 +182,7 @@ class File_manager:
 
             processed_data = process_multiline_strings(data)
 
-            with open(real_path, "w") as outf:
+            with open(real_path, 'w') as outf:
                 self._yaml.dump(processed_data, outf)
             return True
         except Exception as e:
@@ -204,15 +196,15 @@ class File_manager:
         """
         fp = os.path.join(self.overlay_directory, path)
         try:
-            data = open(fp, "rb").read()
+            data = open(fp, 'rb').read()
         except Exception as e:
             self.error_message = str(e)
-            return ""
+            return ''
         try:
-            return data.decode("utf-8")
+            return data.decode('utf-8')
         except UnicodeDecodeError:
-            self.error_message = "binary file"
-            return ""
+            self.error_message = 'binary file'
+            return ''
 
     def get_diff(self, filename: str) -> str:
         """
@@ -221,20 +213,15 @@ class File_manager:
         orig = self._original_contents.get(filename, [])
         mod_fp = os.path.join(self.overlay_directory, filename)
         try:
-            mod_data = open(mod_fp, "rb").read().decode("utf-8")
+            mod_data = open(mod_fp, 'rb').read().decode('utf-8')
             mod = mod_data.splitlines(keepends=True)
         except Exception:
-            return ""
+            return ''
         fromfile = filename
         tofile = os.path.join(self.overlay_directory, filename)
-        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        diff_lines = list(difflib.unified_diff(
-            orig, mod,
-            fromfile, tofile,
-            now, now,
-            n=3
-        ))
-        return "".join(diff_lines)
+        now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        diff_lines = list(difflib.unified_diff(orig, mod, fromfile, tofile, now, now, n=3))
+        return ''.join(diff_lines)
 
     def get_error(self) -> str:
         """
@@ -247,11 +234,10 @@ class File_manager:
         os.makedirs(os.path.dirname(dest), exist_ok=True)
         shutil.copyfile(src, dest)
         try:
-            data = open(dest, "rb").read().decode("utf-8")
+            data = open(dest, 'rb').read().decode('utf-8')
             lines = data.splitlines(keepends=True)
         except UnicodeDecodeError:
             lines = []
         self._original_contents[dst] = lines
         if dst not in self.tracked_files:
             self.tracked_files.append(dst)
-
