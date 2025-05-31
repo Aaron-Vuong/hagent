@@ -56,11 +56,11 @@ class test_diagnostics(unittest.TestCase):
         # 2. load it into a fresh File_manager
         fm = File_manager()
         assert fm.setup(), fm.get_error()
-        assert fm.load_yaml(yaml_file=tmp_yaml, name="preload"), fm.get_error()
+        assert fm.load_yaml(yaml_file=tmp_yaml, name='preload'), fm.get_error()
 
         # 3. verify that the file now exists in the overlay with the patched content
         content = fm.get_file_content('alpha.txt')
-        print(f"content:{content}")
+        print(f'content:{content}')
         assert content.splitlines() == ['foo', 'bar']
 
         # 4. make a small tweak and re-diff
@@ -85,9 +85,9 @@ class test_diagnostics(unittest.TestCase):
 
         # 3. get_file_content returns empty for binary, but no crash
         fm.get_file_content('blob.bin')
-        #assert bin_data == ''
+        # assert bin_data == ''
         # check error_message was set
-        print(f"get_error has {fm.get_error()}")
+        print(f'get_error has {fm.get_error()}')
         assert 'binary' in fm.get_error().lower()
 
 

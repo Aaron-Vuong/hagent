@@ -4,38 +4,37 @@ import yaml
 import pytest
 from hagent.step.v2chisel_fix.v2chisel_fix import V2chisel_fix
 
+
 def write_yaml(data, path):
-    with open(path, "w") as f:
+    with open(path, 'w') as f:
         yaml.safe_dump(data, f)
+
 
 @pytest.fixture
 def pass1_yaml(tmp_path):
     data = {
-        "chisel_pass1": {
-            "chisel_changed":   "class Top extends Module { }",
-            "verilog_candidate": "module Top(); endmodule",
-            "was_valid":        False,
+        'chisel_pass1': {
+            'chisel_changed': 'class Top extends Module { }',
+            'verilog_candidate': 'module Top(); endmodule',
+            'was_valid': False,
         },
-        "verilog_original": "module Top(); endmodule",
-        "verilog_fixed":    "module Top(); endmodule",
-        "chisel_original":  "class Top extends Module { }",
+        'verilog_original': 'module Top(); endmodule',
+        'verilog_fixed': 'module Top(); endmodule',
+        'chisel_original': 'class Top extends Module { }',
     }
-    p = tmp_path / "in.yaml"
+    p = tmp_path / 'in.yaml'
     write_yaml(data, p)
     return p
 
+
 def test_cli_generates_equivalent_chisel(tmp_path, pass1_yaml, monkeypatch):
-    out_yaml = tmp_path / "out.yaml"
+    out_yaml = tmp_path / 'out.yaml'
 
     # stub out _check_equivalence to always pass immediately
-    monkeypatch.setattr(
-        V2chisel_fix,
-        "_check_equivalence",
-        lambda self, gold, cand: (True, None)
-    )
+    monkeypatch.setattr(V2chisel_fix, '_check_equivalence', lambda self, gold, cand: (True, None))
 
     # Simulate CLI invocation: set sys.argv and then call parse_arguments()
-    monkeypatch.setattr(sys, "argv", ["v2chisel_fix", str(pass1_yaml), "-o", str(out_yaml)])
+    monkeypatch.setattr(sys, 'argv', ['v2chisel_fix', str(pass1_yaml), '-o', str(out_yaml)])
 
     step = V2chisel_fix()
     step.parse_arguments()  # now reads from sys.argv
@@ -50,9 +49,9 @@ def test_cli_generates_equivalent_chisel(tmp_path, pass1_yaml, monkeypatch):
     assert result_dict == on_disk
 
     # Because we stubbed equivalence to pass:
-    assert on_disk["lec"] == 1
-    cf = on_disk["chisel_fixed"]
-    assert cf["equiv_passed"] is True
+    assert on_disk['lec'] == 1
+    cf = on_disk['chisel_fixed']
+    assert cf['equiv_passed'] is True
     # No refinement needed
-    assert cf["refined_chisel"] == "class Top extends Module { }"
-    assert cf["chisel_diff"] == ""
+    assert cf['refined_chisel'] == 'class Top extends Module { }'
+    assert cf['chisel_diff'] == ''

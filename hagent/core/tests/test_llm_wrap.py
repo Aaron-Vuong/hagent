@@ -46,6 +46,7 @@ def test_bad_config_file_nonexistent():
     assert 'unable to read conf_file' in lw.last_error
     assert result == []
 
+
 def test_bad_prompt():
     # Test with a non-existent configuration file.
     conf_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'llm_wrap_conf1.yaml')
@@ -56,6 +57,7 @@ def test_bad_prompt():
 
     assert 'unable to find' in lw.last_error
     assert result == []
+
 
 def test_bad_config_file_bad_yaml():
     # Create a temporary file with invalid YAML content.
@@ -74,10 +76,9 @@ def test_bad_config_file_bad_yaml():
 
 
 def test_missing_env_var(monkeypatch):
-
     # Remove the environment variable
-    if "FIREWORKS_AI_API_KEY" in os.environ:
-        monkeypatch.delenv("FIREWORKS_AI_API_KEY", raising=False)
+    if 'FIREWORKS_AI_API_KEY' in os.environ:
+        monkeypatch.delenv('FIREWORKS_AI_API_KEY', raising=False)
 
         # Use existing configuration file for caching test.
         conf_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'llm_wrap_conf1.yaml')
@@ -87,9 +88,9 @@ def test_missing_env_var(monkeypatch):
         with pytest.raises(ValueError):
             jokes = lw.inference({}, 'use_prompt1', n=1)
 
-        assert "Environment" in lw.last_error
+        assert 'Environment' in lw.last_error
     else:
-        assert False, "Must set FIREWORKS_AI_API_KEY for unit test"
+        assert False, 'Must set FIREWORKS_AI_API_KEY for unit test'
 
 
 if __name__ == '__main__':  # pragma: no cover
@@ -99,4 +100,3 @@ if __name__ == '__main__':  # pragma: no cover
     test_bad_config_file_bad_yaml()
     # test_missing_env_var()
     test_bad_prompt()
-
