@@ -36,4 +36,4 @@ jobs:
           cache: 'poetry'
           cache-dependency-path: '**/pyproject.toml'
       - name: Run ruff
-        run: poetry run ruff . 
+        run: poetry run ruff check . 
