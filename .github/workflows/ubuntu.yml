@@ -49,6 +49,8 @@ jobs:
   ruff:
     name: Run Ruff and generate a lint report
     runs-on: ubuntu-latest
+    needs: install
+
     steps:
       - name: Run ruff
         run: poetry run ruff . 
