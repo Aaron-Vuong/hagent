@@ -18,6 +18,7 @@ jobs:
         with:
           python-version: '3.11'
           cache: 'poetry'
+          cache-dependency-path: '**/poetry.lock'
   ruff:
     name: Run Ruff and generate a lint report
     runs-on: ubuntu-latest
@@ -31,5 +32,6 @@ jobs:
         with:
           python-version: '3.11'
           cache: 'poetry'
+          cache-dependency-path: '**/poetry.lock'
       - name: Run ruff
         run: poetry run ruff . 
