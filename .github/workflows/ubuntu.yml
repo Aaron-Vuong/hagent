@@ -2,7 +2,7 @@ name: Ubuntu
 
 on: [push, pull_request]
 
-
+jobs:
   install:
     name: Install Python + Poetry + HAgent package.
     runs-on: ubuntu-latest
