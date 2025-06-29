@@ -141,6 +141,27 @@ def scan_for_yamls(run_dir: str) -> List[str]:
     """
     return glob.glob(f'{run_dir}/*.yaml')
 
+def check_initial(yaml: str) -> bool:
+    """
+    Checks if a YAML file has no inputs/a start node.
+
+    If there is no 'tracing' key, it may be one of two cases.
+    # - Initial input YAML. This will show up as the start of a Flow.
+    # - Non-relevant YAML. This will show up as a disconnected node/event.
+
+    Args:
+        yaml: The YAML filepath to check if it has no dependencies.
+
+    Returns:
+        True if the YAML file has no dependencies on other YAMLs.
+        False otherwise.
+
+    """
+    input_data = read_yaml(yaml)
+    is_initial = False
+    if input_data.get('tracing', None) is None:
+        is_initial = True
+    return is_initial
 
 def parse_yaml_files(yaml_files: List[str]) -> Tuple[set, set, set]:
     """
@@ -163,16 +184,21 @@ def parse_yaml_files(yaml_files: List[str]) -> Tuple[set, set, set]:
         if data.keys == ['error']:
             print('Failure detected in step!')
 
-        # If there is no 'tracing' key, it may be one of two cases.
-        # - Initial input YAML
-        # - Non-relevant YAML
-        if data.get('tracing', None) is None:
-            initial.add(os.path.basename(f))
+        # Skip any initial YAML files, they will
+        # be accounted for when looking at inputs of the
+        # first layer of YAML files w/ dependencies.
+        if check_initial(f):
             continue
 
         # Track the inputs/output YAMLs.
         for input in data['tracing']['input']:
             inputs.add(input)
+            # Also, if this input has no input of its own, it should
+            # be added to the initial set.
+            if check_initial(input):
+                initial.add(input)
+                continue
+
         outputs.add(data['tracing']['output'])
         # Log the Step itself.
 
