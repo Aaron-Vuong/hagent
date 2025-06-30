@@ -141,8 +141,9 @@ def scan_for_yamls(run_dir: str) -> List[Path]:
     """
     Scans the specified directory for YAML files.
     """
-    p = Path(run_dir)
-    return list(p.glob('*.yaml'))
+    p = Path(run_dir).resolve()
+    l = list([yaml_f.resolve() for yaml_f in p.glob('*.yaml')])
+    return l
 
 def check_initial(yaml_f: Path) -> bool:
     """
@@ -164,7 +165,7 @@ def check_initial(yaml_f: Path) -> bool:
     is_initial = False
     if input_data.get("tracing", None) is None or len(input_data["tracing"]["input"]) == 0:
         is_initial = True
-    logger.info("%s: is_initial(%s)", yaml_f, is_initial)
+    logger.debug("%s: is_initial(%s)", yaml_f, is_initial)
     return is_initial
 
 def parse_yaml_files(discovery_dir: Path, yaml_files: List[Path]) -> Tuple[set, set, set]:
@@ -197,14 +198,16 @@ def parse_yaml_files(discovery_dir: Path, yaml_files: List[Path]) -> Tuple[set, 
             continue
 
         # Track the inputs/output YAMLs.
-        for input in data['tracing']['input']:
-            input_path = Path(input)
+        for idx, input in enumerate(data['tracing']['input']):
+            input_path = Path(discovery_dir) / Path(input)
             inputs.add(input_path)
             # Add to initial as well if it has no dependencies.
-            if check_initial(Path(discovery_dir) / input_path):
+            if check_initial(input_path):
                 initial.add(input_path)
+            data['tracing']['input'][idx] = input_path
 
-        outputs.add(Path(data['tracing']['output']))
+        outputs.add(Path(discovery_dir) / Path(data['tracing']['output']))
+        data['tracing']['output'] = Path(discovery_dir) / Path(data['tracing']['output'])
         # Log the Step itself.
 
         # Start from the __init__
@@ -348,6 +351,10 @@ class Tracer:
                     continue
                 g.add_edge(input_path, output_path)
 
+        logger.debug("Generated Dependency Graph:")
+        for line in nx.generate_network_text(g):
+            logger.debug(line)
+
         cls.graph = g
         return cls.graph
 
@@ -381,6 +388,7 @@ class Tracer:
                 start, end = edge
                 start_step = cls.get_step_from_yaml(sg, start)
                 end_step = cls.get_step_from_yaml(sg, end)
+                logger.debug("Marking Flow from %s -> %s", start_step.name, end_step.name)
                 Tracer.log(
                     TraceEvent(
                         name=flow_name,
