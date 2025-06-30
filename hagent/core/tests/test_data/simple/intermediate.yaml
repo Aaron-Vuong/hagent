@@ -1,0 +1,122 @@
+code_content: |
+  module and_gate_behavioral(output reg Y, input A, input B);
+      always @(A or B) begin
+          Y = A & B;
+      end
+  endmodule
+top_name: and_gate_behavioral
+llm:
+  model: fireworks_ai/accounts/fireworks/models/llama-v3p2-3b-instruct
+  drop_params: true
+added_field_trivial: sample
+step: Trivial
+tracing:
+  start: 1751220427569920.8
+  elapsed: 52.928924560546875
+  input:
+  - hagent/core/tests/test_data/simple/input.yaml
+  output: hagent/core/tests/test_data/simple/tmp.yaml
+  trace_events:
+  - name: Trivial::__init__
+    cat: hagent
+    ph: X
+    ts: 1751220427569134.5
+    pid: 0
+    tid: 129900398368576
+    args:
+      func: __init__
+      func_args:
+      - <__main__.Trivial object at 0x7624c2d52db0>
+      func_kwargs: {}
+      func_result: None
+    dur: 1.9073486328125
+  - name: Trivial::parse_arguments
+    cat: hagent
+    ph: X
+    ts: 1751220427569157.0
+    pid: 0
+    tid: 129900398368576
+    args:
+      func: parse_arguments
+      func_args:
+      - <__main__.Trivial object at 0x7624c2d52db0>
+      func_kwargs: {}
+      func_result: None
+    dur: 4.291534423828125
+  - name: Trivial::read_input
+    cat: hagent
+    ph: X
+    ts: 1751220427569175.2
+    pid: 0
+    tid: 129900398368576
+    args:
+      func: read_input
+      func_args:
+      - <__main__.Trivial object at 0x7624c2d52db0>
+      func_kwargs: {}
+      func_result: "{'code_content': 'module and_gate_behavioral(output reg Y, input
+        A, input B);\\n    always @(A or B) begin\\n        Y = A & B;\\n    end\\\
+        nendmodule\\n', 'top_name': 'and_gate_behavioral', 'llm': {'model': 'fireworks_ai/accounts/fireworks/models/llama-v3p2-3b-instruct',
+        'drop_params': True}}"
+    dur: 715.0173187255859
+  - name: Trivial::setup
+    cat: hagent
+    ph: X
+    ts: 1751220427569174.2
+    pid: 0
+    tid: 129900398368576
+    args:
+      func: setup
+      func_args:
+      - <__main__.Trivial object at 0x7624c2d52db0>
+      func_kwargs: {}
+      func_result: None
+    dur: 732.421875
+  - name: Trivial::setup
+    cat: hagent
+    ph: X
+    ts: 1751220427569173.2
+    pid: 0
+    tid: 129900398368576
+    args:
+      func: setup
+      func_args:
+      - <__main__.Trivial object at 0x7624c2d52db0>
+      func_kwargs: {}
+      func_result: None
+    dur: 740.2896881103516
+  - name: Trivial::temporary_env_vars
+    cat: hagent
+    ph: X
+    ts: 1751220427569921.0
+    pid: 0
+    tid: 129900398368576
+    args:
+      func: temporary_env_vars
+      func_args:
+      - <__main__.Trivial object at 0x7624c2d52db0>
+      func_kwargs: {}
+      func_result: <contextlib._GeneratorContextManager object at 
+        0x7624c2e8fcb0>
+    dur: 2.86102294921875
+  - name: Trivial::run
+    cat: hagent
+    ph: X
+    ts: 1751220427569933.5
+    pid: 0
+    tid: 129900398368576
+    args:
+      func: run
+      func_args:
+      - <__main__.Trivial object at 0x7624c2d52db0>
+      - "{'code_content': 'module and_gate_behavioral(output reg Y, input A, input
+        B);\\n    always @(A or B) begin\\n        Y = A & B;\\n    end\\nendmodule\\\
+        n', 'top_name': 'and_gate_behavioral', 'llm': {'model': 'fireworks_ai/accounts/fireworks/models/llama-v3p2-3b-instruct',
+        'drop_params': True}}"
+      func_kwargs: {}
+      func_result: "{'code_content': 'module and_gate_behavioral(output reg Y, input
+        A, input B);\\n    always @(A or B) begin\\n        Y = A & B;\\n    end\\\
+        nendmodule\\n', 'top_name': 'and_gate_behavioral', 'llm': {'model': 'fireworks_ai/accounts/fireworks/models/llama-v3p2-3b-instruct',
+        'drop_params': True}, 'added_field_trivial': 'sample'}"
+    dur: 0.7152557373046875
+  history: []

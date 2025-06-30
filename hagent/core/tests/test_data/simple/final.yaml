@@ -14,7 +14,7 @@ tracing:
   start: 1748695201604181.2
   elapsed: 2225846.290588379
   input:
-  - tmp.yaml
+  - intermediate.yaml
   output: final.yaml
   trace_events:
   - name: Replicate_code::__init__
