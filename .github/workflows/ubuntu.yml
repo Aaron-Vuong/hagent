@@ -33,7 +33,7 @@ jobs:
         with:
           # Install a specific version of uv.
           version: "0.7.17"
-            #enable-cache: true
+          enable-cache: true
           cache-dependency-glob: "pyproject.toml"
 
       - name: Install project
@@ -51,8 +51,11 @@ jobs:
         with:
           # Install a specific version of uv.
           version: "0.7.17"
-            #enable-cache: true
+          enable-cache: true
           cache-dependency-glob: "pyproject.toml"
+
+      - name: Install project
+        run: uv sync --extra dev
 
       - name: Run ruff
         run: uv run ruff check .
@@ -68,8 +71,11 @@ jobs:
         with:
           # Install a specific version of uv.
           version: "0.7.17"
-            #enable-cache: true
+          enable-cache: true
           cache-dependency-glob: "pyproject.toml"
+
+      - name: Install project
+        run: uv sync --extra dev
 
       - name: Run tests with coverage
         run: |
