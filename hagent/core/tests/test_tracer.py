@@ -194,7 +194,7 @@ class TestTraceEvent:
 
 
 class TestTracer:
-    def clear(self, clear_tracer):
+    def clear(self, clean_tracer):
         assert len(tracer.Tracer.events) == 0
 
     def test_log(self, base_trace_event, clean_tracer):

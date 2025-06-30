@@ -292,6 +292,7 @@ class Tracer:
         cls.events.clear()
         cls.steps.clear()
         cls.id_steps.clear()
+        cls.graph = None
 
     @classmethod
     def get_events(cls) -> List[TraceEvent]:
