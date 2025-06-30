@@ -142,8 +142,7 @@ def scan_for_yamls(run_dir: str) -> List[Path]:
     Scans the specified directory for YAML files.
     """
     p = Path(run_dir).resolve()
-    l = list([yaml_f.resolve() for yaml_f in p.glob('*.yaml')])
-    return l
+    return list([yaml_f.resolve() for yaml_f in p.glob('*.yaml')])
 
 def check_initial(yaml_f: Path) -> bool:
     """
