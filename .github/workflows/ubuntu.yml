@@ -21,21 +21,41 @@ jobs:
           poetry lock
           poetry install
 
+  install_uv:
+    name: Install UV.
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          # Install a specific version of uv.
+          version: "0.7.17"
+          enable-cache: true
+          cache-dependency-glob: "pyproject.toml"
+
+      - name: Install project
+        run: uv sync
+
   ruff:
     name: Run Ruff and generate a lint report
     runs-on: ubuntu-latest
     needs: install
     steps:
       - uses: actions/checkout@v4
-      - name: Install poetry
-        run: pipx install poetry
-      - uses: actions/setup-python@v5
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
         with:
-          python-version: '3.11'
-          cache: 'poetry'
-          cache-dependency-path: '**/pyproject.toml'
+          # Install a specific version of uv.
+          version: "0.7.17"
+          enable-cache: true
+          cache-dependency-glob: "pyproject.toml"
+
       - name: Run ruff
-        run: poetry run ruff check .
+        run: uv run ruff check .
 
   test:
     name: Run tests with coverage
@@ -43,18 +63,14 @@ jobs:
     needs: install
     steps:
       - uses: actions/checkout@v4
-      - name: Install poetry
-        run: pipx install poetry
-      - uses: actions/setup-python@v5
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
         with:
-          python-version: '3.11'
-          cache: 'poetry'
-          cache-dependency-path: '**/pyproject.toml'
-      - name: Install project
-        run: |
-          poetry config virtualenvs.in-project true
-          poetry lock
-          poetry install
+          # Install a specific version of uv.
+          version: "0.7.17"
+          enable-cache: true
+          cache-dependency-glob: "pyproject.toml"
+
       - name: Run tests with coverage
         run: |
           poetry run pytest --cov --cov-branch --cov-report=xml
