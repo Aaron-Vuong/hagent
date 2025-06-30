@@ -1,6 +1,7 @@
 import functools
 import glob
 import json
+import logging
 import networkx as nx
 import os
 import threading
@@ -8,6 +9,7 @@ import time
 
 from abc import ABCMeta
 from enum import Enum
+from pathlib import Path
 from typing import (
     List,
     Tuple,
@@ -23,6 +25,7 @@ LLM_TID = 1
 METADATA_TID = 2
 COST_PID = 2
 
+logger = logging.getLogger(__name__)
 
 def s_to_us(s: float) -> float:
     """
@@ -41,7 +44,7 @@ class Encoder(json.JSONEncoder):
         return super().default(o)
 
 
-def read_yaml(input_file: str) -> dict:
+def read_yaml(input_file: Path) -> dict:
     """
     Reads an input YAML file and attempts to convert it to a Python dictionary.
 
@@ -53,12 +56,13 @@ def read_yaml(input_file: str) -> dict:
         If loading fails, a dictionary with 'error' as its only key is returned instead.
 
     """
+
     try:
         yaml_obj = YAML(typ='safe')
-        with open(input_file, 'r') as f:
+        with open(input_file, 'r', encoding="utf-8") as f:
             data = yaml_obj.load(f)
-    except Exception:
-        return {'error': ''}
+    except Exception as e:
+        data = {'error': e}
     return data
 
 
@@ -135,13 +139,14 @@ class TraceEvent:
         return self.__str__()
 
 
-def scan_for_yamls(run_dir: str) -> List[str]:
+def scan_for_yamls(run_dir: str) -> List[Path]:
     """
     Scans the specified directory for YAML files.
     """
-    return glob.glob(f'{run_dir}/*.yaml')
+    p = Path(run_dir)
+    return list(p.glob('*.yaml'))
 
-def check_initial(yaml: str) -> bool:
+def check_initial(yaml_f: Path) -> bool:
     """
     Checks if a YAML file has no inputs/a start node.
 
@@ -157,22 +162,24 @@ def check_initial(yaml: str) -> bool:
         False otherwise.
 
     """
-    input_data = read_yaml(yaml)
+    input_data = read_yaml(yaml_f)
     is_initial = False
-    if input_data.get('tracing', None) is None:
+    if input_data.get("tracing", None) is None or len(input_data["tracing"]["input"]) == 0:
         is_initial = True
+    logger.info("%s: is_initial(%s)", yaml_f, is_initial)
     return is_initial
 
-def parse_yaml_files(yaml_files: List[str]) -> Tuple[set, set, set]:
+def parse_yaml_files(discovery_dir: Path, yaml_files: List[Path]) -> Tuple[set, set, set]:
     """
     Parses the YAML files for the initial hierarchy of Steps + Tool Calls.
 
     Args:
+        discovery_dir: The directory with all relevant YAML files.
         yaml_files: The list of relevant YAML files to include in the trace.
 
     Returns:
         The dependencies files listed in each YAML under data['tracing']['input']
-        or data['tracing']['output'].
+        or data['tracing']['output']. These are pathlib.Path objects.
 
     """
     initial = set()
@@ -181,9 +188,10 @@ def parse_yaml_files(yaml_files: List[str]) -> Tuple[set, set, set]:
     step_id = 0
     for idx, f in enumerate(yaml_files):
         data = read_yaml(f)
-        if data.keys == ['error']:
+        if data.keys() == ['error']:
             print('Failure detected in step!')
-
+            logger.error('Failure detected in step!')
+            continue
         # Skip any initial YAML files, they will
         # be accounted for when looking at inputs of the
         # first layer of YAML files w/ dependencies.
@@ -192,14 +200,13 @@ def parse_yaml_files(yaml_files: List[str]) -> Tuple[set, set, set]:
 
         # Track the inputs/output YAMLs.
         for input in data['tracing']['input']:
-            inputs.add(input)
-            # Also, if this input has no input of its own, it should
-            # be added to the initial set.
-            if check_initial(input):
-                initial.add(input)
-                continue
+            input_path = Path(input)
+            inputs.add(input_path)
+            # Add to initial as well if it has no dependencies.
+            if check_initial(Path(discovery_dir) / input_path):
+                initial.add(input_path)
 
-        outputs.add(data['tracing']['output'])
+        outputs.add(Path(data['tracing']['output']))
         # Log the Step itself.
 
         # Start from the __init__
@@ -275,6 +282,7 @@ class Tracer:
     events = []
     steps = []
     id_steps = {}
+    graph = None
 
     @classmethod
     def clear(cls) -> List[TraceEvent]:
@@ -311,7 +319,7 @@ class Tracer:
         parallel edges, which would be equivalent to the same input YAML being
         present multiple times in input_files to the Step.
 
-        - Graph nodes are indexed by YAML.
+        Graph nodes are indexed by Path objects: Path(YAML_FILE_NAME).
 
         Args:
             dependencies: Three sets of YAML files
@@ -324,21 +332,30 @@ class Tracer:
 
         """
         initial, _, _ = dependencies
+        # Use the already constructed graph if one was created.
+        if cls.graph is not None:
+            return cls.graph
+
+        # Otherwise, construct the graph representation.
         g = nx.DiGraph()
 
         for step in cls.steps:
-            g.add_node(step.args['data']['tracing']['output'], id=step.args['step_id'], name=step.name)
+            output_path = Path(step.args['data']['tracing']['output'])
+            g.add_node(output_path, id=step.args['step_id'], name=step.name)
             # Map every non-initial input to the output.
             for input in step.args['data']['tracing']['input']:
-                if input in initial:
+                input_path = Path(input)
+                if input_path in initial:
+                    logger.debug("Graph construction -> %s ignored (initial file)", input_path)
                     continue
-                g.add_edge(input, step.args['data']['tracing']['output'])
+                g.add_edge(input_path, output_path)
 
-        return g
+        cls.graph = g
+        return cls.graph
 
     @classmethod
-    def get_step_from_yaml(cls, g: nx.DiGraph, yaml: str):
-        step_id = g.nodes[yaml]['id']
+    def get_step_from_yaml(cls, g: nx.DiGraph, yaml_path: Path):
+        step_id = g.nodes[yaml_path]['id']
         return cls.id_steps[step_id]
 
     @classmethod
@@ -517,7 +534,7 @@ class Tracer:
             tree_iter = nx.bfs_tree(g, potential_root)
             for layer_idx, layer in enumerate(tree_iter):
                 # Ensure the layer is an iterable when 1 element.
-                if isinstance(layer, str):
+                if isinstance(layer, Path) or isinstance(layer, str):
                     layer = [layer]
                 for yaml_file in layer:
                     step_id = g.nodes[yaml_file]['id']
